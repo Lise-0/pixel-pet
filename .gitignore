@@ -1,0 +1,30 @@
+# 依赖
+node_modules/
+
+# 打包产物
+dist/
+out/
+release/
+*.exe
+*.msi
+*.dmg
+*.AppImage
+*.blockmap
+
+# 日志与临时文件
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db
+*.tmp
+_tmp*
+_*_tmp*
+
+# 环境变量 / 密钥
+.env
+.env.*
+!.env.example
+
+# 编辑器
+.vscode/
+.idea/

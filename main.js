@@ -1,0 +1,128 @@
+'use strict';
+
+const electron = require('electron');
+const path = require('path');
+const ctx = require('./lib/context');
+const utils = require('./lib/utils');
+
+// 先注入基础环境：config 模块在加载时会读取 APP_DIR
+ctx.APP_DIR = __dirname;
+ctx.DEBUG = !!process.env.PIXELPET_DEBUG;
+Object.assign(ctx, {
+  app: electron.app,
+  BrowserWindow: electron.BrowserWindow,
+  ipcMain: electron.ipcMain,
+  dialog: electron.dialog,
+  screen: electron.screen,
+  Tray: electron.Tray,
+  Menu: electron.Menu,
+  nativeImage: electron.nativeImage,
+  globalShortcut: electron.globalShortcut,
+  powerMonitor: electron.powerMonitor,
+  shell: electron.shell
+});
+
+ctx.DATA_DIR = utils.resolveDataDir(ctx.app);
+ctx.app.setPath('userData', ctx.DATA_DIR);
+ctx.debugLog = utils.debugLog;
+const { debugLog } = utils;
+
+// 装配各功能模块：模块把方法挂到 ctx 上，跨模块调用统一走 ctx，避免循环依赖
+const { Store } = require('./lib/store');
+require('./lib/config');
+require('./lib/window').attach();
+require('./lib/metrics').attach(ctx);
+require('./lib/tray').attach(ctx);
+require('./lib/autostart').attach(ctx);
+require('./lib/home-window').attach(ctx);
+require('./lib/ipc').attach(ctx);
+
+/** 设置变更后的统一副作用：应用设置 → 广播 → 刷新托盘 */
+ctx.onSettingsChanged = () => {
+  ctx.applySettings();
+  ctx.broadcastSettings();
+  ctx.refreshTray();
+};
+
+process.on('uncaughtException', (err) => {
+  debugLog(`uncaughtException ${err && err.stack}`);
+  console.error('[main] 未捕获异常:', err);
+});
+
+process.on('unhandledRejection', (reason) => {
+  debugLog(`unhandledRejection ${reason && reason.stack ? reason.stack : reason}`);
+  console.error('[main] 未处理的 Promise 拒绝:', reason);
+});
+
+function registerHotkeys() {
+  try {
+    ctx.globalShortcut.unregisterAll();
+    ctx.globalShortcut.register('Alt+P', ctx.toggleVisible);
+  } catch (err) {
+    console.warn('[hotkey] 注册失败:', err.message);
+  }
+}
+
+function quitApp() {
+  ctx.store.flush();
+  ctx.app.isQuitting = true;
+  ctx.app.quit();
+}
+ctx.quitApp = quitApp;
+
+const gotLock = ctx.app.requestSingleInstanceLock();
+debugLog('gotLock=' + gotLock);
+if (!gotLock) {
+  debugLog('quit for single instance lock');
+  ctx.app.quit();
+} else {
+  ctx.app.on('second-instance', () => {
+    if (ctx.petWindow && !ctx.petWindow.isDestroyed()) {
+      ctx.petWindow.showInactive();
+      ctx.store.patch({ window: { visible: true } });
+    }
+  });
+
+  ctx.app.whenReady().then(() => {
+    debugLog('whenReady');
+    ctx.store = new Store(path.join(ctx.app.getPath('userData'), 'settings.json'));
+    ctx.store.load();
+    debugLog('store loaded');
+    ctx.registerIpc();
+    debugLog('ipc registered');
+    ctx.createPetWindow();
+    debugLog('pet window created');
+    ctx.createTray();
+    debugLog('tray created');
+    if (ctx.store.data.home && ctx.store.data.home.showOnStartup !== false) {
+      ctx.openHomeWindow();
+      debugLog('home window opened');
+    }
+    registerHotkeys();
+
+    ctx.screen.on('display-added', ctx.handleDisplaysChanged);
+    ctx.screen.on('display-removed', ctx.handleDisplaysChanged);
+
+    ctx.app.on('activate', () => {
+      if (!ctx.petWindow) ctx.createPetWindow();
+      else ctx.petWindow.showInactive();
+    });
+  }).catch((err) => {
+    debugLog('whenReady failed ' + (err && err.stack));
+    console.error('[main] 启动失败:', err);
+  });
+
+  ctx.app.on('window-all-closed', () => {
+    // 托盘常驻，不退出
+  });
+
+  ctx.app.on('before-quit', () => {
+    debugLog('before-quit');
+    if (ctx.store) ctx.store.flush();
+    if (ctx.metricsTimer) clearInterval(ctx.metricsTimer);
+    if (ctx.dragTimer) clearInterval(ctx.dragTimer);
+    if (ctx.wanderTimer) clearInterval(ctx.wanderTimer);
+    if (ctx.followTimer) clearInterval(ctx.followTimer);
+    ctx.globalShortcut.unregisterAll();
+  });
+}

@@ -1,0 +1,58 @@
+{
+  "_note": "复制整个 _TEMPLATE 文件夹到 assets/skins/<你的皮肤名>/，改掉下面的内容、放入自己的 PNG，就会自动出现在换肤页。id 默认等于文件夹名。",
+  "name": "新伙伴",
+  "desc": "写一句属于它的介绍。",
+  "version": 1,
+  "author": "你",
+  "builtin": false,
+  "order": 9,
+  "thumb": "idle-1.png",
+  "persona": "persona.txt",
+  "theme": {
+    "accent": "#e2a87c",
+    "accentDeep": "#c07b45",
+    "accentSoft": "#fbe6d1"
+  },
+  "canvas": {
+    "width": 160,
+    "height": 180,
+    "groundY": 176
+  },
+  "behavior": {
+    "fatiguePerTickDay": 0.035,
+    "fatiguePerTickNight": 0.07,
+    "fatigueDragAdd": 3,
+    "moodDecayPerTick": 0.017,
+    "moodSleepyThreshold": 85,
+    "idleSleepAfter": 90
+  },
+  "effects": {
+    "sleepZ": "#a9c2d6",
+    "hotDrop": "#93d9f5",
+    "angryMark": "#e2685f"
+  },
+  "actions": {
+    "idle":  { "frames": ["idle-1.png", "idle-2.png"], "fps": 2, "loop": true },
+    "hover": { "frames": ["idle-1.png"], "fps": 2, "loop": true },
+    "click": { "frames": ["click-1.png", "click-2.png"], "fps": 6, "loop": false },
+    "drag":  { "frames": ["drag-1.png", "drag-2.png"], "fps": 3, "loop": true },
+    "happy": { "frames": ["happy-1.png", "happy-2.png"], "fps": 5, "loop": true },
+    "angry": { "frames": ["angry-1.png", "angry-2.png"], "fps": 2, "loop": true },
+    "sleep": { "frames": ["sleep-1.png", "sleep-2.png"], "fps": 1, "loop": true },
+    "walk":  { "frames": ["walk-1.png", "walk-2.png"], "fps": 5, "loop": true, "mirror": true },
+    "run":   { "frames": ["run-1.png", "run-2.png"], "fps": 7, "loop": true, "mirror": true, "bob": 3 },
+    "hot":   { "frames": ["hot-1.png"], "fps": 2, "loop": true },
+    "wave":  { "frames": ["wave-1.png"], "fps": 4, "loop": true },
+    "read":  { "frames": ["read-1.png"], "fps": 2, "loop": true },
+    "mySpecial": { "frames": ["special-1.png", "special-2.png"], "fps": 3, "loop": false }
+  },
+  "triggers": {
+    "idlePool": ["idle", "mySpecial"],
+    "longpress": "happy",
+    "pomodoro": "happy",
+    "cpu": "hot",
+    "mem": "wave",
+    "sit": "wave",
+    "battery": "sleep"
+  }
+}

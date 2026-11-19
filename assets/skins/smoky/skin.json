@@ -1,0 +1,59 @@
+{
+  "id": "smoky",
+  "name": "灰炭炭",
+  "desc": "深灰棕的小虎斑，安静又有点酷。",
+  "version": 1,
+  "author": "PixelPet",
+  "builtin": true,
+  "order": 2,
+  "thumb": "idle-1.png",
+  "persona": "persona.txt",
+  "theme": {
+    "accent": "#8c7b6a",
+    "accentDeep": "#6b5c4d",
+    "accentSoft": "#efe9e1"
+  },
+  "canvas": {
+    "width": 160,
+    "height": 180,
+    "groundY": 176
+  },
+  "behavior": {
+    "fatiguePerTickDay": 0.045,
+    "fatiguePerTickNight": 0.08,
+    "fatigueDragAdd": 2,
+    "moodDecayPerTick": 0.012,
+    "moodSleepyThreshold": 78,
+    "idleSleepAfter": 70
+  },
+  "effects": {
+    "sleepZ": "#9aa7b0",
+    "hotDrop": "#8ec4dc",
+    "angryMark": "#c07b6a"
+  },
+  "actions": {
+    "idle":    { "frames": ["idle-1.png", "idle-2.png"], "fps": 1.6, "loop": true },
+    "hover":   { "frames": ["idle-1.png"], "fps": 2, "loop": true },
+    "click":   { "frames": ["click-1.png", "click-2.png"], "fps": 5, "loop": false },
+    "drag":    { "frames": ["drag-1.png", "drag-2.png"], "fps": 3, "loop": true },
+    "happy":   { "frames": ["happy-1.png", "happy-2.png"], "fps": 4, "loop": true },
+    "angry":   { "frames": ["angry-1.png", "angry-2.png"], "fps": 2, "loop": true },
+    "sleep":   { "frames": ["sleep-1.png", "sleep-2.png"], "fps": 1, "loop": true },
+    "walk":    { "frames": ["happy-1.png", "happy-2.png", "happy-3.png", "happy-4.png"], "fps": 4, "loop": true, "mirror": true },
+    "run":     { "frames": ["happy-1.png", "happy-2.png", "happy-3.png", "happy-4.png"], "fps": 6, "loop": true, "mirror": true, "bob": 2 },
+    "hot":     { "frames": ["hot-1.png"], "fps": 2, "loop": true },
+    "wave":    { "frames": ["wave-1.png"], "fps": 3, "loop": true },
+    "read":    { "frames": ["read-1.png"], "fps": 2, "loop": true },
+    "yawn":    { "frames": ["sleep-1.png", "idle-1.png", "idle-2.png"], "fps": 2, "loop": false },
+    "stretch": { "frames": ["wave-1.png", "idle-1.png"], "fps": 3, "loop": false }
+  },
+  "triggers": {
+    "idlePool": ["idle", "yawn", "stretch"],
+    "longpress": "stretch",
+    "pomodoro": "stretch",
+    "cpu": "hot",
+    "mem": "wave",
+    "sit": "yawn",
+    "battery": "sleep"
+  }
+}

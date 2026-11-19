@@ -1,0 +1,57 @@
+{
+  "id": "default",
+  "name": "紫团子",
+  "desc": "圆滚滚的紫团子，陪你从第一天开始。",
+  "version": 1,
+  "author": "PixelPet",
+  "builtin": true,
+  "order": 1,
+  "thumb": "idle-1.png",
+  "persona": "persona.txt",
+  "theme": {
+    "accent": "#8b7bb8",
+    "accentDeep": "#6d5899",
+    "accentSoft": "#ece7f6"
+  },
+  "canvas": {
+    "width": 160,
+    "height": 180,
+    "groundY": 176
+  },
+  "behavior": {
+    "fatiguePerTickDay": 0.035,
+    "fatiguePerTickNight": 0.07,
+    "fatigueDragAdd": 3,
+    "moodDecayPerTick": 0.017,
+    "moodSleepyThreshold": 85,
+    "idleSleepAfter": 90
+  },
+  "effects": {
+    "sleepZ": "#a9c2d6",
+    "hotDrop": "#93d9f5",
+    "angryMark": "#e2685f"
+  },
+  "actions": {
+    "idle":  { "frames": ["idle-1.png", "idle-2.png"], "fps": 2, "loop": true },
+    "hover": { "frames": ["idle-1.png"], "fps": 2, "loop": true },
+    "click": { "frames": ["click-1.png", "click-2.png"], "fps": 6, "loop": false },
+    "drag":  { "frames": ["drag-1.png", "drag-2.png"], "fps": 3, "loop": true },
+    "happy": { "frames": ["happy-1.png", "happy-2.png", "happy-3.png", "happy-4.png"], "fps": 5, "loop": true },
+    "angry": { "frames": ["angry-1.png", "angry-2.png"], "fps": 2, "loop": true },
+    "sleep": { "frames": ["sleep-1.png", "sleep-2.png"], "fps": 1, "loop": true },
+    "walk":  { "frames": ["happy-1.png", "happy-2.png", "happy-3.png", "happy-4.png"], "fps": 5, "loop": true, "mirror": true },
+    "run":   { "frames": ["happy-1.png", "happy-2.png", "happy-3.png", "happy-4.png"], "fps": 7, "loop": true, "mirror": true, "bob": 3 },
+    "hot":   { "frames": ["hot-1.png"], "fps": 2, "loop": true },
+    "wave":  { "frames": ["wave-1.png"], "fps": 4, "loop": true },
+    "read":  { "frames": ["read-1.png"], "fps": 2, "loop": true }
+  },
+  "triggers": {
+    "idlePool": ["idle"],
+    "longpress": "happy",
+    "pomodoro": "happy",
+    "cpu": "hot",
+    "mem": "wave",
+    "sit": "wave",
+    "battery": "sleep"
+  }
+}

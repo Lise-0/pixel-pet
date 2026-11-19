@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; style-src 'self'; script-src 'self'; img-src 'self' data:" />
+  <title>PixelPet 主控台</title>
+  <link rel="stylesheet" href="home.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <div class="logo">🐾</div>
+      <div>
+        <h1>PixelPet <span>主控台</span></h1>
+        <p><i class="online-dot"></i> 你的桌面伙伴正在线</p>
+      </div>
+    </div>
+    <div class="topbar-right">
+      <div class="clock">
+        <span id="greetText">你好</span>
+        <b id="clockText">--:--</b>
+      </div>
+      <button id="closeBtn" class="icon-btn" title="关闭窗口">✕</button>
+    </div>
+  </header>
+
+  <div class="layout">
+    <!-- 左侧：竖排导航 -->
+    <nav class="nav-sidebar" aria-label="主导航">
+      <div class="nav-group">
+        <div class="nav-caption">菜单</div>
+        <button class="tab active" data-tab="about"><span class="tab-ico">🐾</span><span>关于伙伴</span></button>
+        <button class="tab" data-tab="skin"><span class="tab-ico">🎨</span><span>换皮肤</span></button>
+        <button class="tab" data-tab="settings"><span class="tab-ico">⚙️</span><span>设置</span></button>
+        <button class="tab" data-tab="3d"><span class="tab-ico">🧊</span><span>3D 展示</span><em>新</em></button>
+      </div>
+      <div class="nav-foot">
+        <span>PixelPet</span>
+        <small>v1.0.0</small>
+      </div>
+    </nav>
+
+    <!-- 中部：桌宠实时预览 -->
+    <aside class="preview-panel">
+      <div class="preview-stage" id="previewStage">
+        <canvas id="previewCanvas" width="160" height="180"></canvas>
+      </div>
+
+      <div class="pet-identity">
+        <div class="pet-name" id="petName">紫团子</div>
+        <div class="pet-desc" id="petDesc">正在读取伙伴信息…</div>
+      </div>
+
+      <div class="mood-bars">
+        <div class="bar-row">
+          <span class="bar-label"><i class="bar-icon mood">♥</i>心情</span>
+          <div class="bar"><i id="barMood"></i></div>
+          <b id="valMood">--</b>
+        </div>
+        <div class="bar-row">
+          <span class="bar-label"><i class="bar-icon fatigue">☾</i>疲劳</span>
+          <div class="bar"><i id="barFatigue" class="fatigue"></i></div>
+          <b id="valFatigue">--</b>
+        </div>
+        <div class="bar-row">
+          <span class="bar-label"><i class="bar-icon affection">✿</i>好感</span>
+          <div class="bar"><i id="barAffection" class="affection"></i></div>
+          <b id="valAffection">--</b>
+        </div>
+      </div>
+
+      <div class="preview-actions">
+        <button id="toggleVisible" class="btn">隐藏宠物</button>
+        <button id="openSettings" class="btn ghost">设置</button>
+      </div>
+    </aside>
+
+    <!-- 右侧：功能内容 -->
+    <main class="content">
+      <!-- 关于伙伴 -->
+      <section class="tab-panel active" id="panel-about">
+        <div class="hero-card">
+          <div class="hero-icon">🐱</div>
+          <div class="hero-copy">
+            <h2>你的桌面小伙伴</h2>
+            <p>它会陪你工作、在屏幕发热时提醒你、坐太久催你站起来，还能和你一起专注。</p>
+            <p class="mood-line" id="petMoodText">正在认识你…</p>
+          </div>
+        </div>
+
+        <div class="section-title">快捷互动 <small>点一下，它就有反应</small></div>
+        <div class="quick-grid">
+          <button id="quickFollow" class="quick-btn">
+            <span class="quick-ico">🐾</span>
+            <span class="quick-label"><b>跟随鼠标</b><small>让它跑着来找你</small></span>
+          </button>
+          <button id="quickGreet" class="quick-btn">
+            <span class="quick-ico">💬</span>
+            <span class="quick-label"><b>打个招呼</b><small>听它说句话</small></span>
+          </button>
+          <button id="quickFocus" class="quick-btn">
+            <span class="quick-ico">🍅</span>
+            <span class="quick-label"><b>开始专注</b><small>一起安静一会儿</small></span>
+          </button>
+          <button id="quickHide" class="quick-btn">
+            <span class="quick-ico">👁️</span>
+            <span class="quick-label"><b>隐藏宠物</b><small>让它休息一下</small></span>
+          </button>
+        </div>
+
+        <div class="section-title">互动小贴士</div>
+        <div class="tip-card">
+          <ul class="tip-list">
+            <li><span class="tip-ico">🖱️</span>点一点切换跟随，长按摸摸头，拖动它换个位置</li>
+            <li><span class="tip-ico">⌨️</span>按 <kbd>Alt</kbd>+<kbd>P</kbd> 随时显示或隐藏它</li>
+            <li><span class="tip-ico">🍅</span>开启番茄钟，它会安静陪你专注到结束</li>
+          </ul>
+        </div>
+
+        <div class="stat-grid">
+          <div class="stat"><b id="statPomodoro">--</b><span>专注分钟</span></div>
+          <div class="stat"><b id="statAffection">--</b><span>累计好感</span></div>
+          <div class="stat"><b id="statSkin">1</b><span>可用皮肤</span></div>
+        </div>
+      </section>
+
+      <!-- 换皮肤 -->
+      <section class="tab-panel" id="panel-skin">
+        <div class="panel-head">
+          <h2>换皮肤</h2>
+          <p>选一个你喜欢的模样，切换后立即生效。</p>
+        </div>
+
+        <div class="skin-import-banner">
+          <div class="sib-icon">🧩</div>
+          <div class="sib-copy">
+            <b>导入自己的皮肤</b>
+            <span>精灵图 / 序列帧 / 皮肤包，四步生成一套独立皮肤</span>
+          </div>
+          <button id="importSkinBtn" class="btn">打开导入向导</button>
+        </div>
+
+        <div class="skin-grid" id="skinGrid">
+          <div class="loading">正在读取皮肤…</div>
+        </div>
+        <div class="hint-box">
+          <strong>每个皮肤都是独立文件夹</strong>
+          <p>内置皮肤在程序目录的 <code>assets/skins/</code>；用向导导入的皮肤放在可写的「我的皮肤」目录，两者互不干扰。每款皮肤都有自己的 <code>skin.json</code>（动作、帧率、主题、行为参数）、<code>persona.txt</code>（专属台词）和 PNG 帧，也可以直接复制 <code>_TEMPLATE</code> 手动新建。</p>
+          <div class="hint-actions">
+            <button id="refreshSkins" class="btn ghost small">刷新皮肤</button>
+            <button id="openAssets" class="btn ghost small">打开我的皮肤目录</button>
+            <button id="openBuiltin" class="btn ghost small">查看内置模板</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- 设置 -->
+      <section class="tab-panel" id="panel-settings">
+        <div class="settings-intro">
+          <h2>设置</h2>
+          <p class="sub">修改即时生效，状态每 60 秒自动保存一次。</p>
+        </div>
+
+        <div class="settings-card">
+          <h3 class="card-title">外观</h3>
+          <div class="setting-row">
+            <label for="qScale">大小</label>
+            <input id="qScale" type="range" min="50" max="200" step="5" />
+            <b id="qScaleVal">100%</b>
+          </div>
+          <div class="setting-row">
+            <label for="qOpacity">透明度</label>
+            <input id="qOpacity" type="range" min="30" max="100" step="5" />
+            <b id="qOpacityVal">100%</b>
+          </div>
+          <div class="setting-row">
+            <label for="qVolume">音量</label>
+            <input id="qVolume" type="range" min="0" max="100" step="1" />
+            <b id="qVolumeVal">60</b>
+          </div>
+          <div class="setting-row">
+            <label for="qActionRate">动作频率</label>
+            <input id="qActionRate" type="range" min="30" max="200" step="5" />
+            <b id="qActionRateVal">100%</b>
+          </div>
+          <p class="sub sub-tight">调低让动作更舒缓，调高让动作更活泼。</p>
+        </div>
+
+        <div class="settings-card">
+          <h3 class="card-title">行为</h3>
+          <label class="switch"><input id="qLock" type="checkbox" /><span>锁定位置（防止误拖动）</span></label>
+          <label class="switch"><input id="qPassthrough" type="checkbox" /><span>鼠标穿透（宠物不可点击，需在托盘关闭）</span></label>
+          <label class="switch"><input id="qRoam" type="checkbox" /><span>自由走动（空闲时散步）</span></label>
+        </div>
+
+        <div class="settings-card">
+          <h3 class="card-title">系统</h3>
+          <label class="switch"><input id="qMonitor" type="checkbox" /><span>系统联动（CPU / 内存 / 久坐）</span></label>
+          <label class="switch"><input id="qIdleReminder" type="checkbox" /><span>久坐提醒（连续 60 分钟无操作）</span></label>
+          <label class="switch"><input id="qAutoStart" type="checkbox" /><span>开机自动启动</span></label>
+          <label class="switch"><input id="qShowHome" type="checkbox" /><span>启动时打开主控台</span></label>
+        </div>
+
+        <div class="settings-card">
+          <h3 class="card-title">番茄钟</h3>
+          <div class="setting-row">
+            <label for="qFocus">专注时长</label>
+            <input id="qFocus" class="num" type="number" min="1" max="120" step="1" />
+            <b>分钟</b>
+          </div>
+          <div class="setting-row">
+            <label for="qBreak">休息时长</label>
+            <input id="qBreak" class="num" type="number" min="1" max="60" step="1" />
+            <b>分钟</b>
+          </div>
+          <div class="pomodoro-box">
+            <div>
+              <h3>番茄钟</h3>
+              <span id="qPomodoroStatus" class="status">未开始</span>
+            </div>
+            <button id="qPomodoroBtn" class="btn">开始专注</button>
+          </div>
+        </div>
+
+        <div class="settings-card">
+          <h3 class="card-title">数据</h3>
+          <p class="path" id="dataPath">读取中…</p>
+          <div class="data-actions">
+            <button id="qOpenData" class="btn ghost small">打开数据目录</button>
+            <button id="qReset" class="btn danger small">恢复默认</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- 3D 展示预留 -->
+      <section class="tab-panel" id="panel-3d">
+        <div class="coming-soon">
+          <div class="cube-scene" aria-hidden="true">
+            <div class="cube">
+              <span class="face front">🐱</span>
+              <span class="face back">3D</span>
+              <span class="face right">✦</span>
+              <span class="face left">✦</span>
+              <span class="face top">◇</span>
+              <span class="face bottom">◇</span>
+            </div>
+          </div>
+          <h2>3D 展示 · 即将推出</h2>
+          <p>未来这里会用 3D 模型展示你的小伙伴，支持旋转视角、换装和更丰富的动作。</p>
+          <div class="roadmap">
+            <div class="road-item done"><i>✓</i><span>主控面板与皮肤框架</span></div>
+            <div class="road-item"><i>2</i><span>3D 模型与动作接入</span></div>
+            <div class="road-item"><i>3</i><span>视角旋转与换装</span></div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <!-- 页内视图：皮肤导入向导（不弹出新窗口） -->
+    <div class="wizard-layer" id="wizardLayer" hidden></div>
+  </div>
+
+  <script src="skin-wizard.js"></script>
+  <script src="home.js"></script>
+</body>
+</html>
