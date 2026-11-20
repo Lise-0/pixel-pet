@@ -99,6 +99,8 @@ let down = null;
 let longTimer = null;
 let moved = false;
 let followClickAt = 0;       // 跟随点击专用防抖
+let pendingClickTimer = null;  // 单击延迟判定：等一个双击窗口再决定是跟随还是舔手
+const DOUBLE_CLICK_MS = 280;   // 两次点击落在此间隔内判定为双击
 
 let bubbleTimer = null;
 let hoverTimer = null;
@@ -236,10 +238,10 @@ async function init() {
     stateTimers = [];
     // 其余一次性/循环句柄也一并清理，避免热重载或嵌入场景下空转。
     // clearTimeout 与 clearInterval 在浏览器中共用同一 ID 池，可交叉清除。
-    [bubbleTimer, hoverTimer, hintTimer, pomodoroTimer, pomodoroBlipTimer].forEach((t) => {
+    [bubbleTimer, hoverTimer, hintTimer, pendingClickTimer, pomodoroTimer, pomodoroBlipTimer].forEach((t) => {
       if (t) { clearTimeout(t); clearInterval(t); }
     });
-    bubbleTimer = hoverTimer = hintTimer = pomodoroTimer = pomodoroBlipTimer = null;
+    bubbleTimer = hoverTimer = hintTimer = pendingClickTimer = pomodoroTimer = pomodoroBlipTimer = null;
     persistStateOnUnload();
   });
 }
@@ -387,6 +389,8 @@ canvas.addEventListener('pointerdown', (event) => {
   longTimer = setTimeout(() => {
     if (!down || moved) return;
     down.long = true;
+    // 长按是独立彩蛋（摸头 happy），不能让挂起的单击在 280ms 时先把跟随打开。
+    cancelPendingClick();
     lastInteraction = Date.now();
     setOverride('happy', 1600);
     bubble(say('longpress', '放开啦，好痒——'), 1800);
@@ -420,10 +424,12 @@ document.addEventListener('pointermove', (event) => {
       // 否则长按回调仍会触发 happy 动作和气泡（点击彩蛋已被 locked 屏蔽，长按漏了）。
       moved = true;
       clearTimeout(longTimer);
+      cancelPendingClick();
       return;
     }
     moved = true;
     clearTimeout(longTimer);
+    cancelPendingClick();
     if (following) api.followStop();   // 请主进程停止跟随，状态由它回推
     dragging = true;
     api.dragStart();
@@ -528,6 +534,23 @@ function onFollowEndedFromMain() {
   persistStateSoon();
 }
 
+/**
+ * 舔手（双击专属彩蛋）：抬起前爪舔一舔。旧的 wave 动作就是抬爪姿势，
+ * 皮肤可以用 triggers.lick 映射到自己的动作；没配则回退到 wave。
+ * 跟随时也允许播放——这是用户主动点的即时反馈，优先级高于跟随表现。
+ */
+function doLick() {
+  if (dragging) return;
+  const now = Date.now();
+  lastInteraction = now;
+  touchAffection();
+  setOverride('lick', 2000);
+  bubble(say('lick', '（抬起爪子舔了舔）'), 1800, true);  // 跟随时也显示这句即时反馈
+  blip(680, 0.06, 'sine', 0.045);
+  changeMood(3);
+  persistStateSoon();
+}
+
 function handleClick() {
   // 位置锁定期间点击不再请求跟随，避免出现“窗口移动但动作不变”的假跟随。
   // 但不能静默吞掉：用户会以为点击失灵，所以给一行轻提示说明原因。
@@ -536,18 +559,35 @@ function handleClick() {
     blip(360, 0.05);
     return;
   }
-  const now = Date.now();
 
-  // 单击切换“追随鼠标”：只向主进程发切换请求，状态由主进程裁决并回推，
-  // 不再本地改 following（本地改再反向通知会与主控台按钮/托盘形成双状态源冲突）。
-  if (now - followClickAt < 320) return;
+  // 单击 = 切换跟随，双击 = 舔手。两者共用 pointerup，必须用延迟窗口区分：
+  // 第一下先挂起，若在 DOUBLE_CLICK_MS 内等到第二下就取消跟随、改播舔手；
+  // 超时才当作单击执行跟随切换。否则双击必然先触发一次跟随，看起来像失灵。
+  const now = Date.now();
+  if (pendingClickTimer) {
+    clearTimeout(pendingClickTimer);
+    pendingClickTimer = null;
+    if (now - followClickAt >= 0 && now - followClickAt <= DOUBLE_CLICK_MS) {
+      doLick();
+      return;
+    }
+  }
   followClickAt = now;
   lastInteraction = now;
-  touchAffection();
+  pendingClickTimer = setTimeout(() => {
+    pendingClickTimer = null;
+    // 定时器回调执行时再裁决跟随：期间可能被拖拽/锁定/关闭窗口改变状态。
+    if (locked || dragging) return;
+    touchAffection();
+    api.followToggle();
+    persistStateSoon();
+  }, DOUBLE_CLICK_MS);
+}
 
-  api.followToggle();
-  persistStateSoon();
-  // 单击专用于切换跟随；摸头长按、拖拽等彩蛋保留在其它交互里。
+function cancelPendingClick() {
+  if (!pendingClickTimer) return;
+  clearTimeout(pendingClickTimer);
+  pendingClickTimer = null;
 }
 
 function scheduleHover() {
@@ -784,9 +824,10 @@ function pomodoroTick() {
 
 /* ---------------- 气泡与音效 ---------------- */
 
-function bubble(text, ms = 2200) {
-  // 跟随期间一律不弹气泡：它有 2px 深棕边框和浅色底，在小窗里非常像“选中黑框”
-  if (!text || following) return;
+function bubble(text, ms = 2200, force = false) {
+  // 跟随期间一律不弹气泡：它有 2px 深棕边框和浅色底，在小窗里非常像“选中黑框”。
+  // 唯一例外是双击舔手的即时反馈（force=true）——用户点了就要看得见，否则又像失灵。
+  if (!text || (following && !force)) return;
   bubbleEl.textContent = text;
   bubbleEl.classList.add('show');
   clearTimeout(bubbleTimer);
@@ -856,6 +897,9 @@ function resolveAction(expr) {
   const mapped = t && typeof t[expr] === 'string' ? t[expr] : expr;
   if (actionConfig[mapped]) return mapped;
   if (actionConfig[expr]) return expr;
+  // 舔手是双击彩蛋：皮肤没专门做 lick 动作时，回退到抬爪的 wave 帧，
+  // 这样老皮肤（含内置默认皮肤）双击也有动作，不必改素材就能用。
+  if (expr === 'lick' && actionConfig.wave) return 'wave';
   return 'idle';
 }
 
@@ -901,8 +945,11 @@ function fpsOf(expr) {
 function resolveExpr() {
   const now = Date.now();
   let expr;
+  // 双击舔手是用户主动点的即时反馈，优先级高于跟随表现：即使正在跟随也要能看到抬爪。
+  const licking = overrideExpr && overrideExpr.name === 'lick' && now < overrideExpr.until;
+  if (licking) expr = 'lick';
   // 跟随时优先表现：移动中切小跑，停下切待机，不被长期 override 卡住
-  if (following) expr = followMoving ? 'run' : 'idle';
+  else if (following) expr = followMoving ? 'run' : 'idle';
   else if (overrideExpr && now < overrideExpr.until) expr = overrideExpr.name;
   else {
     if (overrideExpr) overrideExpr = null;

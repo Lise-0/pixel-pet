@@ -26,6 +26,7 @@
     { key: 'run',   label: '小跑',   fps: 7, loop: true, mirror: true, bob: 2 },
     { key: 'hot',   label: '发热',   fps: 2, loop: true },
     { key: 'wave',  label: '招手',   fps: 4, loop: true },
+    { key: 'lick',  label: '舔爪',   fps: 3, loop: false },
     { key: 'read',  label: '陪伴',   fps: 2, loop: true }
   ];
 
@@ -619,6 +620,7 @@
     { key: 'happy',  re: /(happy|joy|smile|laugh|cheer|开心|笑|高兴|欢喜)/i },
     { key: 'angry',  re: /(angry|mad|anger|生气|怒|愤怒)/i },
     { key: 'wave',   re: /(wave|waving|hello|hi|挥手|招手|打招呼)/i },
+    { key: 'lick',   re: /(lick|licking|groom|wash|舔|舔爪|舔手|洗脸)/i },
     { key: 'click',  re: /(click|touch|tap|pat|点击|摸|戳)/i },
     { key: 'drag',   re: /(drag|pull|拖拽|拖动|拽|拉)/i },
     { key: 'hot',    re: /(hot|heat|sweat|发热|热|烫|汗)/i },

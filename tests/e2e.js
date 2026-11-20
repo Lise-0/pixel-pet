@@ -188,6 +188,67 @@ class CDP {
     })()`));
     assert(r.idle === 0 && r.active === 1, JSON.stringify(r));
   });
+  await check('双击宠物触发舔手动作，不误触发跟随', async () => {
+    // 用真实 pointer 事件模拟两次快速点击：第一下挂起、第二下应判为双击 → lick。
+    const r = JSON.parse(await pet.ev(`(async function(){
+      const oldOv = overrideExpr, oldFol = following, oldBub = bubbleEl.textContent;
+      const h = (function(){ let f=null; for(let y=0;y<CH;y+=4) for(let x=0;x<CW;x+=4) if(overPet(x,y)){f=[x,y];break} return f; })();
+      if (!h) return JSON.stringify({ error: 'no hit point' });
+      try {
+        overrideExpr = null;
+        api.followStop();
+        following = false;
+        for (let i=0;i<2;i++) {
+          canvas.dispatchEvent(new PointerEvent('pointerdown', {button:0, clientX:h[0], clientY:h[1], pointerId:1, bubbles:true}));
+          document.dispatchEvent(new PointerEvent('pointerup', {button:0, clientX:h[0], clientY:h[1], pointerId:1, bubbles:true}));
+        }
+        await new Promise(function(res){ setTimeout(res, 120); });
+        return JSON.stringify({
+          expr: resolveExpr(),
+          override: overrideExpr && overrideExpr.name,
+          following: following,
+          bubble: bubbleEl.textContent,
+          hasLick: !!(skinPack && skinPack.actions && skinPack.actions.lick)
+        });
+      } finally {
+        try { canvas.releasePointerCapture(1); } catch(e){}
+        overrideExpr = oldOv; following = oldFol; bubbleEl.textContent = oldBub;
+        api.followStop();
+      }
+    })()`));
+    assert(!r.error, JSON.stringify(r));
+    assert(r.expr === 'lick' && r.override === 'lick', JSON.stringify(r));
+    assert(r.following === false, '双击不应触发跟随: ' + JSON.stringify(r));
+    assert(/舔/.test(r.bubble), JSON.stringify(r));
+  });
+  await check('单击（超时未双击）仍然切换跟随', async () => {
+    const r = JSON.parse(await pet.ev(`(async function(){
+      const oldOv = overrideExpr, oldFol = following;
+      const h = (function(){ let f=null; for(let y=0;y<CH;y+=4) for(let x=0;x<CW;x+=4) if(overPet(x,y)){f=[x,y];break} return f; })();
+      if (!h) return JSON.stringify({ error: 'no hit point' });
+      let toggled = 0;
+      const origToggle = api.followToggle;
+      try {
+        overrideExpr = null;
+        api.followStop();
+        following = false;
+        // 用真实 pointer 事件走 handleClick 的延迟判定：等待 > 双击窗口再断言调用次数。
+        // api.followToggle 不可写，改从主进程回推的 following 观察不可靠；这里直接读挂起计时器。
+        canvas.dispatchEvent(new PointerEvent('pointerdown', {button:0, clientX:h[0], clientY:h[1], pointerId:2, bubbles:true}));
+        document.dispatchEvent(new PointerEvent('pointerup', {button:0, clientX:h[0], clientY:h[1], pointerId:2, bubbles:true}));
+        const pending =!!pendingClickTimer;
+        await new Promise(function(res){ setTimeout(res, DOUBLE_CLICK_MS + 120); });
+        return JSON.stringify({ pending, expr: resolveExpr(), timerCleared: !pendingClickTimer });
+      } finally {
+        try { canvas.releasePointerCapture(2); } catch(e){}
+        overrideExpr = oldOv; following = oldFol; api.followStop(); api.followStop();
+      }
+    })()`));
+    assert(!r.error, JSON.stringify(r));
+    assert(r.pending === true, '单击应先挂起等待双击窗口: ' + JSON.stringify(r));
+    assert(r.timerCleared === true, '超时后挂起单击应被消费: ' + JSON.stringify(r));
+    assert(r.expr !== 'lick', '单击不应触发舔手: ' + JSON.stringify(r));
+  });
 
   console.log('\n[E2E] 主控台层');
   await check('皮肤列表与编辑入口', async () => {

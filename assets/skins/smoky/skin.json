@@ -42,6 +42,7 @@
     "run":     { "frames": ["happy-1.png", "happy-2.png", "happy-3.png", "happy-4.png"], "fps": 6, "loop": true, "mirror": true, "bob": 2 },
     "hot":     { "frames": ["hot-1.png"], "fps": 2, "loop": true },
     "wave":    { "frames": ["wave-1.png"], "fps": 3, "loop": true },
+    "lick":    { "frames": ["wave-1.png"], "fps": 3, "loop": false },
     "read":    { "frames": ["read-1.png"], "fps": 2, "loop": true },
     "yawn":    { "frames": ["sleep-1.png", "idle-1.png", "idle-2.png"], "fps": 2, "loop": false },
     "stretch": { "frames": ["wave-1.png", "idle-1.png"], "fps": 3, "loop": false }
