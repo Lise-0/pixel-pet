@@ -3,9 +3,14 @@
 /** 纯逻辑单元测试：不需要 Electron，node tests/unit.js 即可运行 */
 
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const zlib = require('node:zlib');
 const { Store, DEFAULT_SETTINGS, sanitizePatch } = require('../lib/store');
 const { deepMerge, clamp } = require('../lib/utils');
 const stats = require('../lib/pomodoro-stats');
+const { readZip } = require('../lib/skin-import');
 
 let passed = 0;
 let failed = 0;
@@ -167,6 +172,71 @@ test('deepMerge 保留未覆盖字段', () => {
   assert.equal(out.b.c, 9);
   assert.equal(out.b.d, 3);
   assert.equal(base.b.c, 2);   // 不改原对象
+});
+
+console.log('\n[单测] 皮肤 ZIP 读取安全 skin-import');
+
+/** 构造一个最小可用的单条目 zip（store / deflate），用于安全回归测试 */
+function buildZip({ name, compressed, method = 8, claimedUncomp = compressed.length, flags = 0x800 }) {
+  const nameBuf = Buffer.from(name, 'utf8');
+  const local = Buffer.alloc(30);
+  local.writeUInt32LE(0x04034b50, 0);      // 本地文件头签名
+  local.writeUInt16LE(20, 4);
+  local.writeUInt16LE(flags, 6);
+  local.writeUInt16LE(method, 8);
+  local.writeUInt32LE(compressed.length, 18); // 压缩大小
+  local.writeUInt32LE(claimedUncomp, 22);     // 声明的解压大小（可被伪造）
+  local.writeUInt16LE(nameBuf.length, 26);
+  const central = Buffer.alloc(46);
+  central.writeUInt32LE(0x02014b50, 0);    // 中央目录签名
+  central.writeUInt16LE(flags, 8);
+  central.writeUInt16LE(method, 10);
+  central.writeUInt32LE(compressed.length, 20);
+  central.writeUInt32LE(claimedUncomp, 24);
+  central.writeUInt16LE(nameBuf.length, 28);
+  const eocd = Buffer.alloc(22);
+  eocd.writeUInt32LE(0x06054b50, 0);       // EOCD 签名
+  eocd.writeUInt16LE(1, 8);                // 本盘条目数
+  eocd.writeUInt16LE(1, 10);               // 总条目数
+  eocd.writeUInt32LE(central.length + nameBuf.length, 12);
+  eocd.writeUInt32LE(local.length + nameBuf.length + compressed.length, 16);
+  return Buffer.concat([local, nameBuf, compressed, central, nameBuf, eocd]);
+}
+
+function withZipFile(buf, fn) {
+  const file = path.join(os.tmpdir(), `pixelpet-zip-test-${process.pid}-${Math.random().toString(36).slice(2)}.zip`);
+  fs.writeFileSync(file, buf);
+  try { return fn(file); } finally { fs.unlinkSync(file); }
+}
+
+test('正常 deflate 皮肤包可正确读取', () => {
+  const raw = Buffer.from('hello pixelpet');
+  const zip = buildZip({ name: 'a.txt', compressed: zlib.deflateRawSync(raw) });
+  withZipFile(zip, (file) => {
+    const entries = readZip(file);
+    assert.equal(entries.length, 1);
+    assert.equal(entries[0].name, 'a.txt');
+    assert.equal(entries[0].buffer.toString(), 'hello pixelpet');
+  });
+});
+
+test('伪造极小 uncompSize 的解压炸弹被拦截', () => {
+  // 极小压缩体可膨胀到 65MB（超过 60MB 预算），中央目录却只声明 100 字节。
+  // 修复前会在真实长度校验前就 inflateRawSync 分配巨量内存；修复后由
+  // maxOutputLength 在解压阶段封顶并抛出友好错误。
+  const bomb = zlib.deflateRawSync(Buffer.alloc(65 * 1024 * 1024, 0));
+  const zip = buildZip({ name: 'bomb.bin', compressed: bomb, claimedUncomp: 100 });
+  withZipFile(zip, (file) => {
+    assert.throws(() => readZip(file), /60MB/);
+  });
+});
+
+test('zip slip 路径穿越条目被跳过', () => {
+  const raw = Buffer.from('evil');
+  const zip = buildZip({ name: '../evil.txt', compressed: zlib.deflateRawSync(raw) });
+  withZipFile(zip, (file) => {
+    assert.throws(() => readZip(file), /没有可用的文件/);
+  });
 });
 
 console.log(`\n[单测结果] 通过 ${passed}，失败 ${failed}`);

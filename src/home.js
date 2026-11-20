@@ -679,6 +679,9 @@ async function init() {
   api.onPomodoroStatus(renderPomodoro);
   if (api.onPomodoroStats) api.onPomodoroStats(renderFocusStats);
   if (api.onGotoTab) api.onGotoTab((tab) => switchTab(tab));
+  // 所有 IPC 监听注册完成后回执主进程，主进程此时才补发可能待跳转的 Tab，
+  // 避免首次打开时消息早于监听器注册而丢失。
+  if (api.homeReady) api.homeReady();
 
   // 向导完成导入后：重扫皮肤目录，并按用户勾选决定是否立刻换上新皮肤
   document.addEventListener('skins:changed', async (event) => {

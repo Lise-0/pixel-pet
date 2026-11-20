@@ -462,7 +462,12 @@ function onFollowEndedFromMain() {
   // 都要把穿透状态交还渲染层并强制重算，否则会残留“窗口可点/穿透”的错状态。
   following = false;
   followMoving = false;
-  overrideExpr = null;
+  // 跟随时点番茄钟：startPomodoro 会先请求停跟随并立即设好 read override，
+  // 而本回推是异步 IPC、晚于 override 到达。此刻不能把刚设的专注陪伴动作清掉，
+  // 否则专注期间宠物会回退到待机/睡觉。
+  const focusOverride = pomodoro && pomodoro.phase === 'focus'
+    && overrideExpr && overrideExpr.name === 'read';
+  if (!focusOverride) overrideExpr = null;
   lastInteraction = Date.now();
   // 停止跟随也保持画面干净，不把跟随时压住的气泡延迟放出来
   hideBubble();
@@ -703,7 +708,7 @@ function pomodoroTick() {
     const breakMin = Math.max(1, Number(settings.pomodoro.break) || 5);
     // 上报专注完成：主进程负责落盘统计与系统通知
     if (api.reportPomodoroComplete) {
-      api.reportPomodoroComplete({ phase: 'focus', minutes: pomodoro.minutes || focusMin, at: Date.now() });
+      api.reportPomodoroComplete({ phase: 'focus', minutes: pomodoro.minutes || 25, at: Date.now() });
     }
     pomodoro = { phase: 'break', endAt: Date.now() + breakMin * 60000, minutes: breakMin };
     renderPomodoroTimer();

@@ -53,5 +53,6 @@ contextBridge.exposeInMainWorld('pet', {
   onPomodoroStatus: (cb) => ipcRenderer.on('pomodoro:status', (event, data) => cb(data)),
   onPomodoroStats: (cb) => ipcRenderer.on('pomodoro:stats', (event, data) => cb(data)),
   onGotoTab: (cb) => ipcRenderer.on('home:goto-tab', (event, tab) => cb(tab)),
+  homeReady: () => ipcRenderer.send('home:ready'),
   getPomodoro: () => ipcRenderer.invoke('pomodoro:get')
 });
