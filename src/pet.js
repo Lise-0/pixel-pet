@@ -47,6 +47,7 @@ const DEFAULT_BEHAVIOR = {
   fatiguePerTickDay: 0.8,        // 白天约 +4.8/分钟
   fatiguePerTickNight: 1.5,      // 夜间约 +9/分钟
   fatigueRecoverPerTick: 1.2,    // 离开后约 -7.2/分钟
+  fatigueSleepRecoverPerTick: 2.5, // 打盹中约 -15/分钟，比自然增长快，能真正缓过来
   fatigueDragAdd: 3,
   moodBaseline: 70,              // 心情自然基准，缓慢向它靠拢
   moodDecayPerTick: 0.3,         // 长时间没人陪时额外下降
@@ -56,7 +57,7 @@ const DEFAULT_BEHAVIOR = {
 
 /** 老皮肤/内置皮肤的 manifest 里写的是旧版极慢速率，抬到保底线，避免数值看起来永远不动 */
 function enforceBehaviorFloor(b) {
-  ['fatiguePerTickDay', 'fatiguePerTickNight', 'fatigueRecoverPerTick', 'moodDecayPerTick'].forEach((k) => {
+  ['fatiguePerTickDay', 'fatiguePerTickNight', 'fatigueRecoverPerTick', 'fatigueSleepRecoverPerTick', 'moodDecayPerTick'].forEach((k) => {
     b[k] = Math.max(Number(b[k]) || 0, DEFAULT_BEHAVIOR[k]);
   });
   return b;
@@ -526,7 +527,16 @@ function tickState() {
   if (!settings) return;
   const hour = new Date().getHours();
   const night = hour >= 23 || hour < 6;
-  fatigue = clamp(fatigue + (night ? behavior.fatiguePerTickNight : behavior.fatiguePerTickDay), 0, 100);
+  const now = Date.now();
+  // 打盹中（sleep 表现生效）：疲劳由自然增长改为缓慢恢复，让"睡一觉"真的能缓过来。
+  // 否则用户一直不离开电脑时疲劳只会涨不会降，顶到 100 后永远卡在睡觉动作。
+  const napping = !!(overrideExpr && overrideExpr.name === 'sleep' && now < overrideExpr.until);
+  if (napping) {
+    fatigue = clamp(fatigue - behavior.fatigueSleepRecoverPerTick, 0, 100);
+    mood = clamp(mood + 0.4, 0, 100);   // 眯一会儿，心情也略微回升
+  } else {
+    fatigue = clamp(fatigue + (night ? behavior.fatiguePerTickNight : behavior.fatiguePerTickDay), 0, 100);
+  }
 
   const away = awayMs();
   // 心情：随时间缓慢向基准漂移 + 轻微起伏，让数值一直"活着"（几十秒可见）。
@@ -543,10 +553,14 @@ function tickState() {
   }
 
   const sleepy = fatigue > behavior.moodSleepyThreshold;
-  // 跟随时只表现跑/停，不让“困了/打盹”气泡和 override 插进来抢画面
-  if (!following && sleepy && !dragging && !overrideExpr && Math.random() < 0.25) {
-    setOverride('sleep', 10000);
-    bubble(say('sleep', '呼……好困。'), 2500);
+  // 跟随时只表现跑/停，不让"困了/打盹"气泡和 override 插进来抢画面。
+  // 越累越想睡；因为打盹会恢复疲劳，疲劳会在困倦线附近起伏，而不是卡死在 100。
+  if (!napping && !following && sleepy && !dragging && !overrideExpr) {
+    const napChance = fatigue > 95 ? 0.5 : 0.3;
+    if (Math.random() < napChance) {
+      setOverride('sleep', 15000);
+      bubble(say('sleep', '呼……打个盹。'), 2500);
+    }
   }
 }
 
