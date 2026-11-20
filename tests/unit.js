@@ -11,6 +11,9 @@ const { Store, DEFAULT_SETTINGS, sanitizePatch } = require('../lib/store');
 const { deepMerge, clamp } = require('../lib/utils');
 const stats = require('../lib/pomodoro-stats');
 const { readZip } = require('../lib/skin-import');
+const skinImport = require('../lib/skin-import');
+const config = require('../lib/config');
+const fsMod = require('node:fs');
 
 let passed = 0;
 let failed = 0;
@@ -237,6 +240,60 @@ test('zip slip 路径穿越条目被跳过', () => {
   withZipFile(zip, (file) => {
     assert.throws(() => readZip(file), /没有可用的文件/);
   });
+});
+
+console.log('\n[单测] 皮肤清单加载性能 config');
+
+test('inspect 只读取 skin.json/persona.txt，忽略任意文本配置文件', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pixelpet-inspect-'));
+  try {
+    // 放一个伪装成配置的文件，内容含敏感标记
+    fs.writeFileSync(path.join(dir, 'secrets.txt'), 'TOP_SECRET_SHOULD_NOT_LEAK');
+    fs.writeFileSync(path.join(dir, 'config.json'), '{"leak":"TOP_SECRET_SHOULD_NOT_LEAK"}');
+    // 一张最小 PNG（1x1）让 inspect 有可用素材，避免整体抛错
+    const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
+    fs.writeFileSync(path.join(dir, 'idle-1.png'), png);
+    const info = skinImport.inspect([dir]);
+    assert.equal(info.ok, true);
+    const dump = JSON.stringify(info);
+    assert.ok(!dump.includes('TOP_SECRET_SHOULD_NOT_LEAK'),
+      'secrets.txt/config.json 的内容不应出现在 inspect 结果中');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('listSkins 每款皮肤只读单张缩略图而非全部帧', () => {
+  const skins = config.listSkins();
+  assert.ok(skins.length >= 2, '应至少能列出内置皮肤');
+  for (const s of skins) {
+    assert.equal(typeof s.thumb, 'string');
+    assert.ok(s.thumb.startsWith('data:image/png;base64,'), `${s.id} 应有缩略图`);
+    assert.equal(s.frames, undefined, '清单不应携带全部帧数据');
+  }
+  // 统计 readFileSync 读取 .png 的次数：旧实现会解码每款皮肤的全部帧（17+ 张），
+  // 新实现每款只读一张缩略图，因此总次数不应超过皮肤数量。
+  const realRead = fsMod.readFileSync;
+  let pngReads = 0;
+  fsMod.readFileSync = function (file, ...args) {
+    if (typeof file === 'string' && /\.png$/i.test(file)) pngReads += 1;
+    return realRead.call(this, file, ...args);
+  };
+  try {
+    config.listSkins();
+  } finally {
+    fsMod.readFileSync = realRead;
+  }
+  // 允许每款皮肤一次命中 + 极少量兜底重读
+  assert.ok(pngReads <= skins.length + 2,
+    `PNG 读取次数 ${pngReads} 明显超过皮肤数 ${skins.length}，疑似回归为全帧解码`);
+});
+
+test('listSkins 与 readSkin 缩略图一致', () => {
+  const meta = config.listSkins().find((s) => s.id === 'default');
+  const pack = config.readSkin('default');
+  assert.ok(meta && pack);
+  assert.equal(meta.thumb, pack.thumb, '同一皮肤的清单缩略图应与完整包一致');
 });
 
 console.log(`\n[单测结果] 通过 ${passed}，失败 ${failed}`);

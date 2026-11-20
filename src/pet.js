@@ -100,6 +100,7 @@ let followClickAt = 0;       // 跟随点击专用防抖
 
 let bubbleTimer = null;
 let hoverTimer = null;
+let stateTimers = [];           // 养成/存盘/待机定时器句柄，卸载时统一清理
 let pomodoro = null;
 let pomodoroTimer = null;
 let pomodoroBlipTimer = null;
@@ -209,10 +210,13 @@ async function init() {
   applySettings(settings);
   api.setIgnoreMouse(true);
 
-  setInterval(tickState, 10000);
-  setInterval(persistState, 10000);
-  setInterval(watchIdle, 10000);
-  setInterval(maybeRoam, 4000);
+  // 用包装函数统一做可见性判断：窗口隐藏（如切换到其它应用导致桌宠最小化）时
+  // 跳过状态计算与存盘，避免无谓的 IPC 和磁盘写入。函数本身不变，便于测试直接调用。
+  const whenVisible = (fn) => () => { if (!document.hidden) fn(); };
+  stateTimers.push(setInterval(whenVisible(tickState), 10000));
+  stateTimers.push(setInterval(whenVisible(persistState), 10000));
+  stateTimers.push(setInterval(whenVisible(watchIdle), 10000));
+  stateTimers.push(setInterval(maybeRoam, 4000));   // maybeRoam 内部已判断 document.hidden
 
   api.onSettings(applySettings);
   api.onCommand(handleCommand);
@@ -223,7 +227,11 @@ async function init() {
   if (api.onFollowMotion) api.onFollowMotion(onFollowMotion);
   api.onWanderEnded((info) => stopWalk(!!(info && info.edge)));
 
-  window.addEventListener('beforeunload', persistStateOnUnload);
+  window.addEventListener('beforeunload', () => {
+    stateTimers.forEach(clearInterval);
+    stateTimers = [];
+    persistStateOnUnload();
+  });
 }
 
 function applySettings(next) {

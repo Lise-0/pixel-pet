@@ -82,6 +82,7 @@
     idEdited: false,
     busy: false,
     raf: 0,
+    previewGen: 0,      // 预览动画代次令牌：每次启停递增，作废尚未完成的异步加载与旧循环
     previewImgs: [],
     result: null,
     edit: null,         // 编辑态：{ originalId, builtin }；普通导入为 null
@@ -844,28 +845,32 @@
 
   function startPreview() {
     stopPreview();
+    const gen = S.previewGen;   // 本代令牌：异步加载完成后若代次已变，说明预览已被停止/重启
     const idle = S.rows.find((r) => r.key === 'idle') || S.rows[0];
     const urls = idle && idle.frames && idle.frames.length
       ? idle.frames.map((i) => S.frames[i] && S.frames[i].dataUrl).filter(Boolean)
       : S.frames.slice(0, 2).map((f) => f.dataUrl);
     Promise.all(urls.map(loadImage)).then((list) => {
+      if (gen !== S.previewGen) return;   // 加载期间已被 stopPreview 作废，绝不启动循环
       S.previewImgs = list.filter(Boolean);
       const fps = (idle && Number(idle.fps)) || 2;
       const cv = $('wzPreviewCanvas');
       const c = cv.getContext('2d');
       c.imageSmoothingEnabled = false;
       const tick = (now) => {
-        if (S.step !== 4 || $('wzDone').hidden === false || !S.previewImgs.length) return;
+        // 三重守卫：代次失效 / 离开第4步 / 已完成导入，都立即终止，不再续帧
+        if (gen !== S.previewGen || S.step !== 4 || $('wzDone').hidden === false || !S.previewImgs.length) return;
         c.clearRect(0, 0, cv.width, cv.height);
         const img = S.previewImgs[Math.floor(now / 1000 * fps) % S.previewImgs.length];
         c.drawImage(img, Math.round((cv.width - img.width) / 2), Math.round((cv.height - 4) - img.height));
         S.raf = requestAnimationFrame(tick);
       };
       S.raf = requestAnimationFrame(tick);
-    });
+    }).catch(() => { /* 图片加载失败时保持画布空白，不影响向导 */ });
   }
 
   function stopPreview() {
+    S.previewGen += 1;          // 作废所有在途的异步加载回调与旧循环
     if (S.raf) cancelAnimationFrame(S.raf);
     S.raf = 0;
   }

@@ -101,12 +101,22 @@ class CDP {
   });
 
   console.log('\n[E2E] 桌宠层');
-  await check('奶龙睡觉符号修复无回归', async () => {
-    const r = await pet.ev(`(async function(){
-      const old=currentSkin;
-      await loadSkin('my-pet-2971');
-      const fallback = resolveAction('sleep') === resolveAction('idle');
-      await loadSkin(old);
+  await check('睡觉符号守卫无回归（缺动作回退 idle）', async () => {
+    // 不依赖任何本机导入的皮肤 ID：临时移除 sleep 动作映射，验证 resolveAction('sleep')
+    // 会回退到 idle（drawExtras 据此用 hasOwnAction 守卫，不给无睡觉动作的皮肤画 z z），
+    // 测试结束原样恢复，绝不改动真实皮肤包。
+    const r = await pet.ev(`(function(){
+      const t = skinPack && skinPack.triggers;
+      const hadTrig = !!(t && Object.prototype.hasOwnProperty.call(t, 'sleep'));
+      const savedTrig = hadTrig ? t.sleep : undefined;
+      const hadAct = Object.prototype.hasOwnProperty.call(actionConfig, 'sleep');
+      const savedAct = actionConfig.sleep;
+      // 同时移除 triggers 映射和动作本身，模拟“皮肤没有专属睡觉动作”
+      if (t) delete t.sleep;
+      delete actionConfig.sleep;
+      const fallback = resolveAction('sleep') === 'idle';
+      if (hadTrig) t.sleep = savedTrig;
+      if (hadAct) actionConfig.sleep = savedAct;
       return fallback ? 'ok' : 'fail';
     })()`);
     assert(r === 'ok', r);
