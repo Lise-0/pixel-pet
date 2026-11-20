@@ -7,7 +7,7 @@
 - **透明桌宠窗口**：无边框、置顶、鼠标穿透，可拖动，支持点击/长按/拖拽互动
 - **鼠标跟随**：点击开启后慢悠悠跟过来，并与光标保持一段距离、不再贴住指针；设置页「跟随松紧」滑杆可调（0% 贴身紧跟 / 100% 松散慢随，默认 70%）。进主控台自动停止，可随时取消/锁定
 - **状态养成**：心情、疲劳、好感随时间和互动变化；打盹能恢复疲劳，离开太久自动休息
-- **系统联动**：CPU/内存/电池指标驱动表情（发热冒汗、高负载疲惫等）
+- **系统联动**：CPU/内存/电池指标驱动动作与提醒（发热冒汗、内存吃紧、久坐提醒等）
 - **番茄钟**：专注/休息计时，完成记录与 7 天统计，可选完成通知
 - **主控台**：状态总览、近期状态趋势图、专注记录、外观与行为设置
 - **皮肤系统**：manifest 驱动的独立皮肤包，内置皮肤 + 用户皮肤分离存放
@@ -71,10 +71,12 @@ npm run test:e2e -- 9333
 - `persona`：台词文件名（字符串，默认 `persona.txt`）或内嵌对象
 - `theme`：`accent` / `accentDeep` / `accentSoft`
 - `canvas`：`width` / `height` / `groundY`
-- `actions`：动作名 → `{ frames: [...], fps, loop, mirror, bob }`
-- `triggers`：事件 → 动作名（如 `longpress`、`cpu`、`mem`、`battery`、`pomodoro`、`sit`、`idlePool`）
+- `actions`：动作名 → `{ frames: [...], fps, loop, mirror, bob, drift }`（`drift:false` 表示原地动作不横移窗口）
+- `triggers`：事件 → 动作名（如 `longpress`、`cpu`、`mem`、`battery`、`pomodoro`、`sit`、`focus`、`idlePool`、`lick`）；运行时按事件名解析，可把系统事件重映射到皮肤独有动作。`focus` 只映射专注期间的陪伴动作（默认 `read`），`pomodoro` 映射阶段完成/休息动作（默认 `happy`）
 - `behavior`：疲劳/心情变化速率等参数
 - `effects`：`sleepZ` / `hotDrop` / `angryMark` 符号颜色
+
+`persona.txt` 的 `[分组]` 对应事件/动作名；皮肤没写某个分组时，代码只用一句内置默认短句兜底（不是共享的全局台词表），想完全自定义就补齐对应分组。
 
 `sleep` / `hot` / `angry` 这类状态符号只在皮肤提供了对应专属动作帧时才绘制；没有专属动作的皮肤会回退到 `idle`，不会凭空冒出符号。`assets/skins/_TEMPLATE` 是模板目录（下划线开头不会被扫描为皮肤）。
 

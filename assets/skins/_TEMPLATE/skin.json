@@ -35,7 +35,7 @@
     "idle":  { "frames": ["idle-1.png", "idle-2.png"], "fps": 2, "loop": true },
     "hover": { "frames": ["idle-1.png"], "fps": 2, "loop": true },
     "click": { "frames": ["click-1.png", "click-2.png"], "fps": 6, "loop": false },
-    "drag":  { "frames": ["drag-1.png", "drag-2.png"], "fps": 3, "loop": true },
+    "drag":  { "frames": ["happy-1.png", "happy-2.png"], "fps": 6, "loop": true, "mirror": true },
     "happy": { "frames": ["happy-1.png", "happy-2.png"], "fps": 5, "loop": true },
     "angry": { "frames": ["angry-1.png", "angry-2.png"], "fps": 2, "loop": true },
     "sleep": { "frames": ["sleep-1.png", "sleep-2.png"], "fps": 1, "loop": true },
@@ -43,7 +43,6 @@
     "run":   { "frames": ["run-1.png", "run-2.png"], "fps": 7, "loop": true, "mirror": true, "bob": 3 },
     "hot":   { "frames": ["hot-1.png"], "fps": 2, "loop": true },
     "wave":  { "frames": ["wave-1.png"], "fps": 4, "loop": true },
-    "lick":  { "frames": ["wave-1.png"], "fps": 3, "loop": false },
     "read":  { "frames": ["read-1.png"], "fps": 2, "loop": true },
     "mySpecial": { "frames": ["special-1.png", "special-2.png"], "fps": 3, "loop": false }
   },

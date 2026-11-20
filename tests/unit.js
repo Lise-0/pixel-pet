@@ -15,7 +15,13 @@ const skinImport = require('../lib/skin-import');
 const config = require('../lib/config');
 const { followParams, followStep, followHysteresis, DEFAULT_LOOSENESS, FOLLOW_TICK_MS } = require('../lib/follow-params');
 const { hoverHit } = require('../lib/hover-hit');
+const { RESYNC_MS, needsResync, needsFullReset } = require('../lib/ignore-sync');
 const fsMod = require('node:fs');
+
+// 运行时 say() 会读取、但皮肤不一定有同名动作的「事件类」台词分组。
+// 其余台词分组必须有同名动作（含 idlePool 独有动作），否则就是写了没人读的死配置。
+const SAY_GROUPS = ['click', 'longpress', 'battery', 'cpu', 'mem', 'sit',
+  'pomodoro', 'angry', 'follow', 'followStop'];
 
 let passed = 0;
 let failed = 0;
@@ -315,6 +321,75 @@ test('listSkins 与 readSkin 缩略图一致', () => {
   assert.equal(meta.thumb, pack.thumb, '同一皮肤的清单缩略图应与完整包一致');
 });
 
+test('散步横移开关：默认皮肤原地播放，其余皮肤保持边走边移', () => {
+  const def = config.readSkin('default');
+  const other = config.listSkins().find((s) => s.id !== 'default' && s.source === 'builtin');
+  assert.equal(def.actions.walk.drift, false,
+    '第一个皮肤的 walk 是坐立+舔爪原地动作，不应横移窗口');
+  assert.ok(def.actions.walk.frames.indexOf('idle-2.png') >= 0 &&
+            def.actions.walk.frames.indexOf('sleep-2.png') >= 0,
+    '原地散步仍应是坐立+舔爪两帧交替');
+  assert.ok(other, '应存在另一套内置皮肤用于对照');
+  const otherPack = config.readSkin(other.id);
+  assert.equal(otherPack.actions.walk.drift, true,
+    '未配置 drift 的皮肤应保持原来的横移行为');
+});
+
+test('第一个皮肤待机类动作不含侧身帧（原地不再冒出侧身猫）', () => {
+  const def = config.readSkin('default');
+  const isSide = (f) => /^happy-/.test(f) || f === 'sleep-1.png';
+  // 待机原地会走到的动作：常态待机、原地散步、困倦打盹、悬停、系统事件、番茄钟、舔爪。
+  // 拖动 / 跟随跑动 / 长按开心不在其中——那三个是用户明确要的左右朝向动作。
+  const idleLike = ['idle', 'walk', 'sleep', 'hover', 'wave', 'hot', 'read', 'lick'];
+  for (const key of idleLike) {
+    const act = def.actions[key];
+    assert.ok(act, `应存在动作 ${key}`);
+    assert.ok(!act.frames.some(isSide),
+      `待机动作 ${key} 不应含侧身帧: ${act.frames.join(', ')}`);
+  }
+  assert.ok(def.actions.sleep.frames.indexOf('idle-2.png') >= 0 &&
+            def.actions.sleep.frames.indexOf('sleep-2.png') >= 0,
+    '打盹应改为坐立+舔爪两帧交替');
+});
+
+test('舔爪动作与 [lick] 台词一一对应：没动作的皮肤不留舔爪台词', () => {
+  // 回归「第三个皮肤没有舔爪动作却冒出舔爪语言」：doLick 曾写死舔爪兜底台词，
+  // 第二皮肤/模板还留着指向普通站立图 wave-1.png 的假 lick 动作与 [lick] 台词池。
+  // 只遍历内置皮肤：用户 userData 里的导入皮肤数量因机器而异，CI 与本机应得到同一结果。
+  const skins = config.listSkins().filter((s) => s.source === 'builtin');
+  assert.ok(skins.length >= 2, '至少要扫描到两套内置皮肤用于对照');
+  skins.forEach((meta) => {
+    const pack = config.readSkin(meta.id);
+    if (!pack) return;
+    const hasAction = !!(pack.actions && pack.actions.lick);
+    const hasLines = !!(pack.persona && Array.isArray(pack.persona.lick) && pack.persona.lick.length);
+    assert.equal(hasLines, hasAction,
+      `皮肤 ${meta.id} 的舔爪动作与 [lick] 台词不一致：动作 ${hasAction} / 台词 ${hasLines}`);
+    // 死配置回归：台词文件里的分组都应能在运行时找到读取点（或至少动作本身存在）。
+    Object.keys(pack.persona || {}).forEach((group) => {
+      assert.ok(pack.actions[group] || SAY_GROUPS.indexOf(group) >= 0,
+        `皮肤 ${meta.id} 的 [${group}] 台词分组没有任何读取点`);
+    });
+  });
+  const def = config.readSkin('default');
+  assert.ok(def.actions.lick && def.actions.lick.frames.indexOf('sleep-2.png') >= 0,
+    '只有第一皮肤保留真正的舔爪动作 sleep-2.png');
+  const other = skins.find((s) => s.id !== 'default');
+  const pack = config.readSkin(other.id);
+  assert.ok(pack && !pack.actions.lick && !pack.persona.lick,
+    `内置皮肤 ${other.id} 不做舔爪，也不该残留舔爪台词`);
+});
+
+test('内置皮肤的拖动动作开启镜像，左右朝向才可见', () => {
+  config.listSkins().filter((s) => s.source === 'builtin').forEach((meta) => {
+    const pack = config.readSkin(meta.id);
+    if (pack && pack.actions.drag) {
+      assert.equal(pack.actions.drag.mirror, true,
+        `${meta.id} 的 drag 必须开 mirror 才能表现左右朝向`);
+    }
+  });
+});
+
 test('无 thumb/idle-1.png 时清单与完整包仍选中同一张兜底帧', () => {
   // 构造一个既无 manifest.thumb 也无 idle-1.png 的皮肤：
   // 两个入口的兜底都必须取“按文件名排序的第一张 PNG”，否则缩略图会不一致。
@@ -591,6 +666,29 @@ test('穿透判定：全局光标命中猫身矩形，边缘留余量', () => {
   assert.equal(hoverHit(null, bounds, box), false);
   assert.equal(hoverHit({ x: 1050, y: 480 }, bounds, null), false);
   assert.equal(hoverHit({ x: NaN, y: 480 }, bounds, box), false);
+});
+
+test('穿透状态心跳：镜像脱节后必须定期强制重发', () => {
+  // 回归「鼠标点击又失灵、重启才好」：applyIgnore 早退导致真实窗口状态与镜像
+  // 脱节后永远无法纠正，必须由心跳无条件重新下发。
+  const now = 100000;
+  assert.equal(needsResync(0, now), true, '从未下发过必须强制');
+  assert.equal(needsResync(NaN, now), true, '脏数据必须强制');
+  assert.equal(needsResync(now - 10, now), false, '刚下发过不必重复');
+  assert.equal(needsResync(now - 999, now), false, '间隔内不重发');
+  assert.equal(needsResync(now - RESYNC_MS, now), true, '到达间隔必须重发');
+  assert.equal(needsResync(now - 5000, now), true, '超时必须重发');
+  assert.equal(needsResync(now - 5000, now, 10000), false, '自定义间隔生效');
+  assert.equal(needsResync(now - 2000, now, 0), true, '非法间隔回退默认值');
+});
+
+test('心跳复位：只在目标为可点时做完整状态转换', () => {
+  // 回归「窗口 OS 层面可点但仍不派发 pointerdown」：重发 false 可能被 Electron
+  // 内部早退吃掉，必须走一次穿透→可点的完整转换；目标为穿透时无需复位。
+  assert.equal(needsFullReset(true, false), true, '心跳恢复可点必须完整复位');
+  assert.equal(needsFullReset(true, true), false, '心跳保持穿透不必复位');
+  assert.equal(needsFullReset(false, false), false, '普通 tick 不复位');
+  assert.equal(needsFullReset(false, true), false, '普通 tick 保持穿透不复位');
 });
 
 console.log(`\n[单测结果] 通过 ${passed}，失败 ${failed}`);

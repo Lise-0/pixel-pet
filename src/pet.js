@@ -96,6 +96,7 @@ let ignoring = null;
 let hoverBox = null;                  // 猫身在窗口内的矩形，供主进程主动判定穿透
 let lastHoverBoxSent = null;
 let down = null;
+let lastDragScreenX = 0;             // 拖动中上一次的鼠标屏幕 x，用于判断朝左/朝右
 let longTimer = null;
 let moved = false;
 let followClickAt = 0;       // 跟随点击专用防抖
@@ -105,6 +106,8 @@ const DOUBLE_CLICK_MS = 280;   // 两次点击落在此间隔内判定为双击
 let bubbleTimer = null;
 let hoverTimer = null;
 let hintTimer = null;            // 跟随状态轻提示的收起计时
+let lastIdleLineExpr = '';       // 待机池台词：上次说过台词的动作，避免同一动作反复刷屏
+let lastIdleLineAt = 0;          // 待机池台词冷却时间戳
 let stateTimers = [];           // 养成/存盘/待机定时器句柄，卸载时统一清理
 let pomodoro = null;
 let pomodoroTimer = null;
@@ -117,10 +120,13 @@ const reactionCooldown = {};
 
 /* ---------------- 素材加载 ---------------- */
 
-function makeFrame(name, source) {
+function makeFrame(name, source, target, generation) {
   return new Promise((resolve) => {
     const img = new Image();
     img.onload = () => {
+      // 快速连换皮肤时上一代图片仍会回调：只写自己这一代的临时表，
+      // 绝不能让旧帧混进新皮肤的 frames。
+      if (generation !== spriteGeneration) { resolve(); return; }
       let mask = null;
       let bbox = { x: 0, y: 0, w: img.width, h: img.height };
       try {
@@ -150,7 +156,7 @@ function makeFrame(name, source) {
       } catch (err) {
         // 画布被污染时退化为整图包围盒
       }
-      frames[name] = { img, mask, bbox };
+      target[name] = { img, mask, bbox };
       resolve();
     };
     img.onerror = () => resolve();
@@ -176,6 +182,21 @@ async function loadSkin(skin) {
     return;
   }
 
+  // 先把全部帧加载进临时表：完成前不动全局 frames / 配置 / 画布。
+  // 旧做法先替换配置、清空帧表再异步逐帧加载，rAF 会在空窗期画不出猫并把
+  // hoverBox 置空（换肤瞬间角色消失、点不动）；快速连换还会把上一代帧写回来。
+  const nextFrames = {};
+  await Promise.all(Object.keys(pack.frames).map(
+    (name) => makeFrame(name, pack.frames[name], nextFrames, generation)));
+  if (generation !== spriteGeneration) return;
+  if (!Object.keys(nextFrames).length) {
+    console.warn('[pet] 皮肤帧全部加载失败:', skin);
+    return;
+  }
+
+  // 帧 / 动作表 / 台词 / 画布尺寸一次性替换，同一帧生效，不留半新半旧状态。
+  Object.keys(frames).forEach((name) => delete frames[name]);
+  Object.assign(frames, nextFrames);
   currentSkin = pack.id;
   skinPack = pack;
   persona = pack.persona || {};
@@ -187,11 +208,8 @@ async function loadSkin(skin) {
   CH = Number(cv.height) || 180;
   GROUND_Y = Number(cv.groundY) || 176;
   applyCanvasSize();
-
-  Object.keys(frames).forEach((name) => delete frames[name]);
-  await Promise.all(Object.keys(pack.frames).map((name) => makeFrame(name, pack.frames[name])));
-  if (generation !== spriteGeneration) return;
   lastExpr = '';
+  lastIdleLineExpr = '';
   console.log('[pet] skin loaded:', currentSkin, Object.keys(frames).length, '帧 /', Object.keys(actionConfig).length, '动作');
 }
 
@@ -223,6 +241,14 @@ async function init() {
   stateTimers.push(setInterval(whenVisible(persistState), 10000));
   stateTimers.push(setInterval(whenVisible(watchIdle), 10000));
   stateTimers.push(setInterval(maybeRoam, 4000));   // maybeRoam 内部已判断 document.hidden
+  // 命中框心跳：页面重载、窗口 show/hide、渲染进程恢复时主进程会清空自己的命中框，
+  // 而 resync 的一次性 IPC 可能在渲染层监听器就绪前发出就丢了；换肤/无帧瞬间也可能
+  // 只发空框。每秒无条件重发一次（清掉 2px 节流缓存），保证最终一定收敛到有效框。
+  stateTimers.push(setInterval(() => {
+    if (document.hidden) return;
+    lastHoverBoxSent = null;
+    syncHoverBox();
+  }, 1000));
 
   api.onSettings(applySettings);
   api.onCommand(handleCommand);
@@ -232,16 +258,27 @@ async function init() {
   if (api.onFollowStarted) api.onFollowStarted(onFollowStartedFromMain);
   if (api.onFollowMotion) api.onFollowMotion(onFollowMotion);
   api.onWanderEnded((info) => stopWalk(!!(info && info.edge)));
+  // 主进程在页面重载 / 窗口重新显示后会清空自己的 hoverBox 镜像；这里必须重置
+  // 2px 节流缓存并立刻重发，否则渲染层以为「框没变不用发」，主进程会永远判穿透。
+  if (api.onResyncHover) api.onResyncHover(() => {
+    lastHoverBoxSent = null;
+    if (hoverBox) syncHoverBox();
+  });
 
   window.addEventListener('beforeunload', () => {
     stateTimers.forEach(clearInterval);
     stateTimers = [];
     // 其余一次性/循环句柄也一并清理，避免热重载或嵌入场景下空转。
     // clearTimeout 与 clearInterval 在浏览器中共用同一 ID 池，可交叉清除。
-    [bubbleTimer, hoverTimer, hintTimer, pendingClickTimer, pomodoroTimer, pomodoroBlipTimer].forEach((t) => {
+    // longTimer / roamTimer / persistStateSoon.timer 之前漏清，会在卸载后继续改状态。
+    const handles = [bubbleTimer, hoverTimer, hintTimer, pendingClickTimer, pomodoroTimer,
+      pomodoroBlipTimer, longTimer, roamTimer, persistStateSoon.timer];
+    handles.forEach((t) => {
       if (t) { clearTimeout(t); clearInterval(t); }
     });
-    bubbleTimer = hoverTimer = hintTimer = pendingClickTimer = pomodoroTimer = pomodoroBlipTimer = null;
+    bubbleTimer = hoverTimer = hintTimer = pendingClickTimer = pomodoroTimer =
+      pomodoroBlipTimer = longTimer = roamTimer = null;
+    persistStateSoon.timer = null;
     persistStateOnUnload();
   });
 }
@@ -289,11 +326,15 @@ function maybeRoam() {
 
 function startWalk() {
   if (roamTimer || following || locked || !roamEnabled) return;
-  facing = Math.random() < 0.5 ? -1 : 1;
+  // 原地动作（坐立/舔爪）不该带着窗口横移，否则猫没迈步却整个被拖着滑行。
+  // 皮肤用 walk.drift:false 关掉位移；未配置的皮肤保持原来的边走边移。
+  const act = actionConfig[resolveAction('walk')] || {};
+  const drift = act.drift !== false;
+  if (drift) facing = Math.random() < 0.5 ? -1 : 1;
   const duration = 1600 + Math.random() * 2400;
   lastInteraction = Date.now();
   setOverride('walk', duration);
-  api.wanderStart(facing, 45 + Math.random() * 30);
+  if (drift) api.wanderStart(facing, 45 + Math.random() * 30);
   roamTimer = setTimeout(() => stopWalk(false), duration);
 }
 
@@ -308,7 +349,9 @@ function stopWalk(edge) {
   if (api) api.wanderStop();
   if (edge) {
     facing = -facing;
-    setOverride('wave', 900);
+    setOverride(resolveEvent('wave', 'wave'), 900);
+    const line = say('wave');
+    if (line) bubble(line, 1800);
   }
 }
 
@@ -392,7 +435,7 @@ canvas.addEventListener('pointerdown', (event) => {
     // 长按是独立彩蛋（摸头 happy），不能让挂起的单击在 280ms 时先把跟随打开。
     cancelPendingClick();
     lastInteraction = Date.now();
-    setOverride('happy', 1600);
+    setOverride(resolveEvent('longpress', 'happy'), 1600);
     bubble(say('longpress', '放开啦，好痒——'), 1800);
     blip(520, 0.06);
     changeMood(4);
@@ -411,6 +454,15 @@ document.addEventListener('pointermove', (event) => {
   updateIgnore();
 
   if (hit) scheduleHover();
+
+  // 拖动中：按鼠标水平移动方向决定朝向——左移朝左、右移朝右。
+  // 用屏幕绝对坐标而非 clientX：窗口跟着鼠标走时 clientX 几乎不变，判不出方向。
+  if (dragging) {
+    if (event.screenX < lastDragScreenX) facing = -1;
+    else if (event.screenX > lastDragScreenX) facing = 1;
+    lastDragScreenX = event.screenX;
+    return;
+  }
 
   if (!down || moved) return;
   // 用屏幕绝对坐标判定拖拽：跟随/走动时窗口在移动，clientX 会随之漂移导致误判。
@@ -432,6 +484,11 @@ document.addEventListener('pointermove', (event) => {
     cancelPendingClick();
     if (following) api.followStop();   // 请主进程停止跟随，状态由它回推
     dragging = true;
+    // 拖动一开始就按按下点到当前点的水平位移定朝向，避免第一帧方向不对。
+    lastDragScreenX = event.screenX;
+    const startX = down.sx == null ? down.x : down.sx;
+    if (event.screenX < startX) facing = -1;
+    else if (event.screenX > startX) facing = 1;
     api.dragStart();
     setOverride('drag', 3600000);
     bubble(say('drag', '别晃，头晕……'), 1500);
@@ -493,7 +550,7 @@ function onFollowStartedFromMain() {
   hideBubble();
   // 点下宠物时鼠标就在猫身上，处在「保持距离」圆环内，猫不会立刻移动、动作也几乎不变。
   // 不给可见反馈的话，用户会以为这一下没点上（于是再点一下又关掉），看起来像跟随失灵。
-  showPetHint('跟随中 · 移动鼠标我会慢慢跟上', 2400);
+  showPetHint(say('follow', '跟随中 · 移动鼠标我会慢慢跟上'), 2400);
   // 跟随过程不弹气泡：小窗口里 2px 深色硬边框的气泡几乎横跨半屏，
   // 看起来像人物背后贴了块黑色长方形。跟随时保持画面干净，只保留轻提示音。
   blip(720, 0.09);
@@ -515,16 +572,17 @@ function onFollowEndedFromMain() {
   // 都要把穿透状态交还渲染层并强制重算，否则会残留“窗口可点/穿透”的错状态。
   following = false;
   followMoving = false;
-  // 跟随时点番茄钟：startPomodoro 会先请求停跟随并立即设好 read override，
-  // 而本回推是异步 IPC、晚于 override 到达。此刻不能把刚设的专注陪伴动作清掉，
-  // 否则专注期间宠物会回退到待机/睡觉。
-  const focusOverride = pomodoro && pomodoro.phase === 'focus'
-    && overrideExpr && overrideExpr.name === 'read';
-  if (!focusOverride) overrideExpr = null;
+  // 专注开始时 startPomodoro 会先请求停跟随，这条回推是异步 IPC、晚于提示气泡到达。
+  // 专注期间不清 override、不 hideBubble、也不弹「已停止跟随」，否则刚开始专注的
+  // 可见反馈会被立刻抹掉，看起来又像点了没反应。
+  const focusing = !!pomodoro;
+  if (!focusing) overrideExpr = null;
   lastInteraction = Date.now();
-  // 停止跟随也保持画面干净，不把跟随时压住的气泡延迟放出来
-  hideBubble();
-  showPetHint('已停止跟随', 1400);
+  if (!focusing) {
+    // 停止跟随也保持画面干净，不把跟随时压住的气泡延迟放出来
+    hideBubble();
+    showPetHint(say('followStop', '已停止跟随'), 1400);
+  }
   // 主进程已把窗口设回默认穿透；清掉本地缓存，强制按当前命中重新下发
   ignoring = null;
   hit = overPet(lastPointer.x, lastPointer.y);
@@ -535,8 +593,22 @@ function onFollowEndedFromMain() {
 }
 
 /**
- * 舔手（双击专属彩蛋）：抬起前爪舔一舔。旧的 wave 动作就是抬爪姿势，
- * 皮肤可以用 triggers.lick 映射到自己的动作；没配则回退到 wave。
+ * 皮肤是否真的做了舔爪动作：actions.lick（或 triggers.lick 指向的动作）必须有已加载的帧。
+ * 只写 [lick] 台词、或动作帧文件缺失都不算，否则会出现「画面还在站立、嘴上却在舔爪」的错配。
+ */
+function hasLickAction() {
+  const t = (skinPack && skinPack.triggers) || {};
+  const mapped = typeof t.lick === 'string' && t.lick ? t.lick : 'lick';
+  const key = actionConfig[mapped] ? mapped : (actionConfig.lick ? 'lick' : null);
+  if (!key) return false;
+  const act = actionConfig[key];
+  return Array.isArray(act.frames) && act.frames.some((f) => frames[f]);
+}
+
+/**
+ * 双击反馈：做了舔爪动作的皮肤（第一皮肤）播 actions.lick 并说舔爪台词；
+ * 没有舔爪动作的皮肤只播自己有的互动动作（点击/开心/待机）+ 普通台词，
+ * 不再用写死的「抬起爪子舔了舔」兜底——那是没动作却冒出舔爪语言的根源。
  * 跟随时也允许播放——这是用户主动点的即时反馈，优先级高于跟随表现。
  */
 function doLick() {
@@ -544,8 +616,14 @@ function doLick() {
   const now = Date.now();
   lastInteraction = now;
   touchAffection();
-  setOverride('lick', 2000);
-  bubble(say('lick', '（抬起爪子舔了舔）'), 1800, true);  // 跟随时也显示这句即时反馈
+  if (hasLickAction()) {
+    setOverride('lick', 2000);
+    bubble(say('lick', '（抬起爪子舔了舔）'), 1800, true);  // 跟随时也显示这句即时反馈
+  } else {
+    const expr = actionConfig.click ? 'click' : (actionConfig.happy ? 'happy' : 'idle');
+    setOverride(expr, 1200);
+    bubble(say('click') || say(expr) || say('idle') || '（眨了眨眼）', 1600, true);
+  }
   blip(680, 0.06, 'sine', 0.045);
   changeMood(3);
   persistStateSoon();
@@ -555,13 +633,16 @@ function handleClick() {
   // 位置锁定期间点击不再请求跟随，避免出现“窗口移动但动作不变”的假跟随。
   // 但不能静默吞掉：用户会以为点击失灵，所以给一行轻提示说明原因。
   if (locked) {
-    showPetHint('位置已锁定，先解锁才能跟随', 2000);
+    // 锁定期间被反复戳：用皮肤自己的生气动作 + [angry] 台词给反馈；
+    // angryMark 也只有在真的播 angry 动作时才画（见 drawExtras）。
+    if (actionConfig.angry) setOverride('angry', 1400);
+    showPetHint(say('angry', '位置已锁定，先解锁才能跟随'), 2000);
     blip(360, 0.05);
     return;
   }
 
-  // 单击 = 切换跟随，双击 = 舔手。两者共用 pointerup，必须用延迟窗口区分：
-  // 第一下先挂起，若在 DOUBLE_CLICK_MS 内等到第二下就取消跟随、改播舔手；
+  // 单击 = 切换跟随，双击 = 舔爪（没做舔爪动作的皮肤只给普通互动反馈）。两者共用 pointerup，必须用延迟窗口区分：
+  // 第一下先挂起，若在 DOUBLE_CLICK_MS 内等到第二下就取消跟随、改播双击反馈；
   // 超时才当作单击执行跟随切换。否则双击必然先触发一次跟随，看起来像失灵。
   const now = Date.now();
   if (pendingClickTimer) {
@@ -576,8 +657,15 @@ function handleClick() {
   lastInteraction = now;
   pendingClickTimer = setTimeout(() => {
     pendingClickTimer = null;
-    // 定时器回调执行时再裁决跟随：期间可能被拖拽/锁定/关闭窗口改变状态。
-    if (locked || dragging) return;
+    // 定时器回调执行时再裁决跟随：期间可能被拖拽、锁定、番茄钟或第二次按下改变状态。
+    // down 非空说明用户又按住了（准备双击或长按），这一下绝不能算单击去开跟随。
+    if (locked || dragging || down) return;
+    // 专注期间不允许顺手开跟随：陪伴动作优先，且窗口移动而画面不动会撕裂。
+    if (pomodoro) {
+      showPetHint('专注中，结束后再跟随', 1600);
+      blip(360, 0.05);
+      return;
+    }
     touchAffection();
     api.followToggle();
     persistStateSoon();
@@ -593,8 +681,9 @@ function cancelPendingClick() {
 function scheduleHover() {
   clearTimeout(hoverTimer);
   hoverTimer = setTimeout(() => {
-    if (dragging || overrideExpr) return;
-    setOverride('hover', 1400);
+    if (dragging || following || overrideExpr) return;
+    setOverride(resolveEvent('hover', 'hover'), 1400);
+    maybeIdleLine('hover');
   }, 3000);
 }
 
@@ -708,15 +797,16 @@ async function reloadState() {
   }
 }
 
-function react(key, exprName, text, cooldownMs) {
+function react(key, defaultAction, text, cooldownMs) {
   if (dragging || following) return false;
-  // 番茄钟的 read override 覆盖整个专注时段，系统事件（CPU/电量/久坐）的短时
+  // 番茄钟的专注动作覆盖整个时段，系统事件（CPU/电量/久坐）的短时
   // override 不能打断它，否则专注画面会突然变成 hot/sleep 再回退，前后矛盾。
   if (pomodoro || (overrideExpr && overrideExpr.until > Date.now())) return false;
   const now = Date.now();
   if (reactionCooldown[key] && now - reactionCooldown[key] < cooldownMs) return false;
   reactionCooldown[key] = now;
-  setOverride(exprName, 6000);
+  // 事件名先过 triggers 映射：smoky 的 sit→yawn、导入皮肤自定义动作都能生效。
+  setOverride(resolveEvent(key, defaultAction), 6000);
   if (text) bubble(text, 3500);
   return true;
 }
@@ -732,7 +822,7 @@ function handleMetrics(metrics) {
   if (batteryLow) {
     react('battery', 'sleep', say('battery', '电量好低……要不要充个电？'), 5 * 60 * 1000);
   } else if (metrics.cpu > 80) {
-    react('cpu', 'hot', say('cpu', '电脑好烫，我也热……'), 90000);
+    react('cpu', 'hot', say('cpu') || say('hot', '电脑好烫，我也热……'), 90000);
   } else if (metrics.mem > 0.85) {
     react('mem', 'wave', say('mem', '好多东西，我帮你搬一搬！'), 90000);
   }
@@ -754,21 +844,34 @@ function handleCommand(cmd) {
   // follow:toggle 由主进程统一裁决，不会转发到这里
 }
 
+/** 番茄钟进行中的画面动作：独立于 overrideExpr，跟随、长按、双击都顶不掉它 */
+function pomodoroAction() {
+  if (!pomodoro) return null;
+  // triggers.pomodoro 是「阶段完成/休息」的庆祝动作映射（向导也按这个语义生成）；
+  // 专注期间的陪伴动作独立用 focus 键，默认 read，避免被映射成 happy 抢掉陪伴画面。
+  return pomodoro.action || (pomodoro.phase === 'break'
+    ? resolveEvent('pomodoro', 'happy')
+    : resolveEvent('focus', 'read'));
+}
+
 function startPomodoro() {
   if (pomodoro) {
     bubble('番茄钟正在进行中～', 1600);
     return;
   }
   stopWalk(false);
-  // resolveExpr 中 following 优先级高于 override，跟随时启动番茄钟会导致 read 动作
-  // 永远不显示。开始专注前先停止跟随，状态由主进程 follow:ended 回推。
+  // 专注画面由 pomodoro.action 独立承载（见 resolveExpr），不再借用会被其它互动
+  // 顶掉的 overrideExpr；这里仍先停跟随，避免主进程一边移动窗口一边播陪伴动作。
   if (following && api.followStop) api.followStop();
   facing = 1;
   const focusMin = Math.max(1, Number(settings.pomodoro.focus) || 25);
-  pomodoro = { phase: 'focus', endAt: Date.now() + focusMin * 60000, minutes: focusMin };
-  setOverride('read', focusMin * 60000);
+  pomodoro = {
+    phase: 'focus', endAt: Date.now() + focusMin * 60000, minutes: focusMin,
+    action: resolveEvent('focus', 'read')
+  };
   renderPomodoroTimer();
-  bubble(`一起专注 ${focusMin} 分钟吧！`, 3200);
+  // force：刚开始专注时跟随回推还没到，普通气泡会被 following 压住，点了却看不到反馈。
+  bubble(say('read') || `一起专注 ${focusMin} 分钟吧！`, 3200, true);
   blip(660, 0.12);
   api.reportPomodoro({ running: true, phase: 'focus', remain: focusMin * 60000 });
   pomodoroTimer = setInterval(pomodoroTick, 1000);
@@ -801,14 +904,16 @@ function pomodoroTick() {
     if (api.reportPomodoroComplete) {
       api.reportPomodoroComplete({ phase: 'focus', minutes: pomodoro.minutes || 25, at: Date.now() });
     }
-    pomodoro = { phase: 'break', endAt: Date.now() + breakMin * 60000, minutes: breakMin };
+    pomodoro = {
+      phase: 'break', endAt: Date.now() + breakMin * 60000, minutes: breakMin,
+      action: resolveEvent('pomodoro', 'happy')
+    };
     renderPomodoroTimer();
     mood = clamp(mood + 6, 0, 100);
     affection += 3;
     lastInteraction = Date.now();
     persistState();
     bubble(say('pomodoro', '专注结束，休息一下！'), 4200);
-    setOverride('happy', 4000);
     blip(880, 0.12);
     clearTimeout(pomodoroBlipTimer);
     pomodoroBlipTimer = setTimeout(() => blip(1180, 0.12), 160);
@@ -818,7 +923,7 @@ function pomodoroTick() {
     }
     stopPomodoro(true);
     bubble('休息结束，继续加油！', 3000);
-    setOverride('happy', 2500);
+    setOverride(resolveEvent('pomodoro', 'happy'), 2500);
   }
 }
 
@@ -863,9 +968,27 @@ function say(action, fallback) {
   // 台词池必须是字符串数组：persona.txt 若把某段误配成字符串，
   // pool.length 会非零但 pool[i] 是单个字符，冒出乱码。
   if (Array.isArray(pool) && pool.length) {
-    return pool[Math.floor(Math.random() * pool.length)];
+    const line = pool[Math.floor(Math.random() * pool.length)];
+    if (typeof line === 'string') return line;
   }
   return fallback || '';
+}
+
+/**
+ * 待机池动作（yawn / stretch / mySpecial）与悬停动作偶尔说一句自己的台词。
+ * 低概率 + 30 秒冷却，避免每 4.5 秒换动作就刷屏；只在主循环里调用，
+ * 不塞进 resolveExpr —— 诊断脚本直接读状态机时不会被气泡副作用干扰。
+ */
+function maybeIdleLine(expr) {
+  if (!expr || expr === 'idle' || following || dragging) return;
+  if (lastIdleLineExpr === expr) return;
+  lastIdleLineExpr = expr;
+  const now = Date.now();
+  if (now - lastIdleLineAt < 30000 || Math.random() > 0.3) return;
+  const line = say(expr);
+  if (!line) return;
+  lastIdleLineAt = now;
+  bubble(line, 2000);
 }
 
 /** 用 Web Audio 合成提示音，避免依赖音效素材；音量取自设置 */
@@ -891,14 +1014,28 @@ function blip(freq, duration, type = 'sine', level = 0.05) {
 
 /* ---------------- 绘制 ---------------- */
 
-/** 事件 → 动作名：皮肤可在 triggers 里把标准事件重映射到自己的独有动作 */
+/**
+ * 标准事件 → 皮肤动作名：triggers 里的事件键（longpress / pomodoro / cpu / mem /
+ * sit / battery / click 等）在这里统一解析。
+ * 以前这些键是死配置：react() 把动作名写死、resolveAction() 又只按动作名查表，
+ * README 承诺的「事件→动作」重映射全部静默失效（只有 idlePool 与 lick 生效）。
+ * 解析后仍以动作名交给 setOverride，绘制、符号与帧率逻辑不用改。
+ */
+function resolveEvent(event, fallback) {
+  const t = (skinPack && skinPack.triggers) || {};
+  const mapped = t[event];
+  if (typeof mapped === 'string' && actionConfig[mapped]) return mapped;
+  return actionConfig[fallback] ? fallback : resolveAction(fallback);
+}
+
+/** 动作名 → 实际可用的动作：皮肤也可用 triggers 把标准动作重映射成独有动作 */
 function resolveAction(expr) {
   const t = skinPack && skinPack.triggers;
   const mapped = t && typeof t[expr] === 'string' ? t[expr] : expr;
   if (actionConfig[mapped]) return mapped;
   if (actionConfig[expr]) return expr;
-  // 舔手是双击彩蛋：皮肤没专门做 lick 动作时，回退到抬爪的 wave 帧，
-  // 这样老皮肤（含内置默认皮肤）双击也有动作，不必改素材就能用。
+  // 兼容皮肤用 triggers.lick 自定义动作、或旧存档触发：找不到 lick 时用 wave / idle 兜底。
+  // 双击入口 doLick() 已用 hasLickAction() 分流，没做舔爪的皮肤不会再假装播舔爪。
   if (expr === 'lick' && actionConfig.wave) return 'wave';
   return 'idle';
 }
@@ -945,9 +1082,13 @@ function fpsOf(expr) {
 function resolveExpr() {
   const now = Date.now();
   let expr;
-  // 双击舔手是用户主动点的即时反馈，优先级高于跟随表现：即使正在跟随也要能看到抬爪。
+  // 双击舔爪是用户主动点的即时反馈，优先级最高：即使正在专注/跟随也要能看到抬爪。
   const licking = overrideExpr && overrideExpr.name === 'lick' && now < overrideExpr.until;
+  // 番茄钟专注/休息动作独立成槽：以前只借用 overrideExpr，单击开跟随或长按/双击
+  // 都会把它顶掉，整段专注陪伴画面就没了。
+  const focus = pomodoroAction();
   if (licking) expr = 'lick';
+  else if (focus) expr = focus;
   // 跟随时优先表现：移动中切小跑，停下切待机，不被长期 override 卡住
   else if (following) expr = followMoving ? 'run' : 'idle';
   else if (overrideExpr && now < overrideExpr.until) expr = overrideExpr.name;
@@ -1108,6 +1249,8 @@ function loop(now) {
   if (document.hidden) return;
 
   const expr = resolveExpr();
+  const pool = idlePool();
+  if (expr !== 'idle' && (expr === 'hover' || (pool && pool.indexOf(expr) >= 0))) maybeIdleLine(expr);
   const fps = fpsOf(expr);
   if (now - lastDrawTime < 1000 / Math.max(fps, 1)) return;
   lastDrawTime = now;

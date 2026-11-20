@@ -31,6 +31,9 @@ contextBridge.exposeInMainWorld('pet', {
   setIgnoreMouse: (ignore) => ipcRenderer.send('pet:ignore-mouse', ignore),
   // 猫身在窗口内的命中矩形，由主进程据此主动切换鼠标穿透
   setHoverBox: (box) => ipcRenderer.send('pet:hover-box', box),
+  debugHoverState: () => ipcRenderer.invoke('debug:hover-state'),
+  debugDesyncIgnore: () => ipcRenderer.invoke('debug:desync-ignore'),
+  debugClearHoverBox: () => ipcRenderer.invoke('debug:clear-hover-box'),
   dragStart: () => ipcRenderer.send('pet:drag-start'),
   dragEnd: () => ipcRenderer.send('pet:drag-end'),
   wanderStart: (dir, speed) => ipcRenderer.send('pet:wander-start', { dir, speed }),
@@ -52,6 +55,7 @@ contextBridge.exposeInMainWorld('pet', {
   onFollowMotion: (cb) => ipcRenderer.on('follow:motion', (event, info) => cb(info)),
   onFollowState: (cb) => ipcRenderer.on('follow:state', (event, state) => cb(state)),
   onWanderEnded: (cb) => ipcRenderer.on('pet:wander-ended', (event, data) => cb(data)),
+  onResyncHover: (cb) => ipcRenderer.on('pet:resync-hover', () => cb()),
   onPomodoroStatus: (cb) => ipcRenderer.on('pomodoro:status', (event, data) => cb(data)),
   onPomodoroStats: (cb) => ipcRenderer.on('pomodoro:stats', (event, data) => cb(data)),
   onGotoTab: (cb) => ipcRenderer.on('home:goto-tab', (event, tab) => cb(tab)),

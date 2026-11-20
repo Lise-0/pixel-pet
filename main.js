@@ -76,6 +76,8 @@ if (!gotLock) {
   ctx.app.quit();
 } else {
   ctx.app.on('second-instance', () => {
+    // whenReady 之前 store 还没创建，快速双击启动文件时会走到这里。
+    if (!ctx.store) return;
     if (ctx.petWindow && !ctx.petWindow.isDestroyed()) {
       ctx.petWindow.showInactive();
       ctx.store.patch({ window: { visible: true } });
@@ -104,7 +106,10 @@ if (!gotLock) {
 
     ctx.app.on('activate', () => {
       if (!ctx.petWindow) ctx.createPetWindow();
-      else if (ctx.store.data.window.visible !== false) ctx.petWindow.showInactive();
+      else if (ctx.store.data.window.visible !== false) {
+        ctx.petWindow.showInactive();
+        if (ctx.resyncHoverState) ctx.resyncHoverState();
+      }
       // 用户此前用托盘隐藏了宠物时，点 Dock 图标不应绕过隐藏状态把宠物显示出来
       // 却让托盘菜单/设置里的 visible 仍为 false，造成状态撕裂。
     });
@@ -120,12 +125,15 @@ if (!gotLock) {
   ctx.app.on('before-quit', () => {
     debugLog('before-quit');
     if (ctx.store) ctx.store.flush();
-    if (ctx.metricsTimer) clearInterval(ctx.metricsTimer);
-    if (ctx.dragTimer) clearInterval(ctx.dragTimer);
-    if (ctx.wanderTimer) clearInterval(ctx.wanderTimer);
-    if (ctx.followTimer) clearInterval(ctx.followTimer);
-    if (ctx.dragSafetyTimer) clearTimeout(ctx.dragSafetyTimer);
-    if (ctx.savePosTimer) clearTimeout(ctx.savePosTimer);
+    if (ctx.stopHoverWatch) ctx.stopHoverWatch();
+    if (ctx.metricsTimer) { clearInterval(ctx.metricsTimer); ctx.metricsTimer = null; }
+    if (ctx.dragTimer) { clearInterval(ctx.dragTimer); ctx.dragTimer = null; }
+    if (ctx.wanderTimer) { clearInterval(ctx.wanderTimer); ctx.wanderTimer = null; }
+    if (ctx.followTimer) { clearInterval(ctx.followTimer); ctx.followTimer = null; }
+    if (ctx.dragSafetyTimer) { clearTimeout(ctx.dragSafetyTimer); ctx.dragSafetyTimer = null; }
+    if (ctx.savePosTimer) { clearTimeout(ctx.savePosTimer); ctx.savePosTimer = null; }
+    ctx.followActive = false;
+    ctx.dragInfo = null;
     ctx.globalShortcut.unregisterAll();
   });
 }
