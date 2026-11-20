@@ -16,33 +16,45 @@
 
 ## 运行
 
-运行应用需要 Node.js 18+（含 npm）；端到端测试用到了全局 `WebSocket`，需 Node.js 22+ 才能直接跑 `npm test`。
+**系统要求**：Windows 10/11（安装包与托盘图标按 Windows 打包；源码在 macOS / Linux 也能启动，电池电量采样会自动跳过）。跑源码需要 Node.js 18+（含 npm）；跑完整测试需要 Node.js 22+（E2E 用到全局 `WebSocket`）。
 
 ```bash
-npm install
-npm start        # 启动桌宠
-npm run dev      # 开发调试模式：启动并开放 9223 调试端口
+npm install          # 首次需联网下载 Electron 二进制（约 100 MB）
+npm start            # 启动桌宠（托盘常驻，关窗口不会退出）
+npm run dev          # 开发调试模式：启动并开放 9223 调试端口
 ```
+
+> 仓库里**不含 `.exe`**：安装包属于构建产物，未提交到 Git。想免安装直接双击运行，请在本机执行 `npm run build`，产物在 `dist/PixelPet Setup 1.0.0.exe` 和 `dist/win-unpacked/PixelPet.exe`；或下载项目 Release 里已构建好的安装包。
 
 打包 Windows 安装包：
 
 ```bash
-npm run build        # NSIS 安装包
+npm run build        # NSIS 安装包 + 免安装目录版
 npm run build:dir    # 仅生成目录版
 ```
+
+### 常见问题
+
+- **提示找不到 `electron` 命令**：不要直接敲 `electron .`（那是全局安装的用法）。用 `npm run dev`，或 `npx electron . --remote-debugging-port=9223`。
+- **启动时只闪一下 / 桌宠没多开一份**：应用带单实例锁且托盘常驻，重复启动会把已有实例显示出来，这是预期行为。退出请点托盘菜单「退出」。
+- **`npm start` 报 Electron 二进制缺失**：国内网络下载失败时设置镜像后重装，例如 `ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ npm install`，必要时先删掉 `node_modules`。
+- **`npm start` 报 `Cannot read properties of undefined (reading 'getPath')`**：少数 IDE / 自动化终端会注入 `ELECTRON_RUN_AS_NODE=1`，让 Electron 退化成纯 Node。程序会自动清掉该变量并以桌面模式重启；若仍失败，换系统终端，或执行 `env -u ELECTRON_RUN_AS_NODE npm start`。
+- **首次运行看不到宠物**：宠物默认在屏幕右下角，托盘图标可「显示宠物」；`Alt+P` 也能切换显示。
 
 ## 测试
 
 ```bash
-npm test             # 单元测试 + 端到端测试（E2E 需调试端口，未启动则跳过）
+npm test             # 单元测试 + 端到端测试
 npm run test:unit    # 仅单元测试（纯 Node，无需 Electron）
 npm run test:e2e     # 仅端到端测试
 ```
 
-端到端测试通过 Chrome DevTools Protocol 连接正在运行的应用（默认调试端口 `9223`）。运行前请先启动应用并开启该端口：
+`npm test` 先跑单测，再检测 9223 调试端口：端口上没有实例时会**自动拉起**一个临时调试实例，跑完自动关闭。若本机已有一个不带调试端口的实例占用了单实例锁，E2E 会明确标记「未运行」，不会假装通过（CI 可设 `PIXELPET_STRICT_E2E=1` 把「未运行」视为失败）；此时先退出托盘里的桌宠再跑测试。
+
+端到端测试通过 Chrome DevTools Protocol 连接正在运行的应用。手动启动调试实例：
 
 ```bash
-electron . --remote-debugging-port=9223
+npm run dev
 ```
 
 换端口时把端口传给测试入口即可（应用与测试必须用同一个端口）：

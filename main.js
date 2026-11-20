@@ -1,6 +1,33 @@
 'use strict';
 
-const electron = require('electron');
+let electron;
+try {
+  electron = require('electron');
+} catch (err) {
+  console.error('[PixelPet] 找不到 Electron，请先执行 npm install');
+  process.exit(1);
+}
+
+// 部分 IDE / 自动化终端会注入 ELECTRON_RUN_AS_NODE=1，让 electron.exe 退化成纯 Node：
+// 此时 require('electron') 只返回可执行文件路径，继续往下会在 app.getPath 处崩溃。
+// 清掉该变量并以真正的桌面模式重新拉起，保证 npm start / npm run dev 都能打开。
+if (!electron || !electron.app) {
+  const exe = typeof electron === 'string' ? electron : null;
+  if (exe) {
+    const { spawnSync } = require('child_process');
+    const env = Object.assign({}, process.env);
+    delete env.ELECTRON_RUN_AS_NODE;
+    // 打包版 __dirname 指向 resources/app.asar，此时不能再传 app path，
+    // 否则 Electron 会把 asar 当成启动参数重复解析；让它自己加载 resources 即可。
+    const packaged = /(^|[\\/])app\.asar([\\/]|$)/.test(__dirname);
+    const args = (packaged ? [] : [__dirname]).concat(process.argv.slice(2));
+    const r = spawnSync(exe, args, { env, stdio: 'inherit' });
+    process.exit(r.status === null ? 1 : r.status);
+  }
+  console.error('[PixelPet] 无法以桌面模式启动 Electron，请检查 npm install 是否完整');
+  process.exit(1);
+}
+
 const path = require('path');
 const ctx = require('./lib/context');
 const utils = require('./lib/utils');
