@@ -244,7 +244,7 @@ test('zip slip 路径穿越条目被跳过', () => {
 
 console.log('\n[单测] 皮肤清单加载性能 config');
 
-test('inspect 只读取 skin.json/persona.txt，忽略任意文本配置文件', () => {
+test('inspect 不读取未声明的任意文本配置文件', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pixelpet-inspect-'));
   try {
     // 放一个伪装成配置的文件，内容含敏感标记

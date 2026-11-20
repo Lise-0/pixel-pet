@@ -508,8 +508,7 @@ function handleClick() {
 
   api.followToggle();
   persistStateSoon();
-  // 说明：旧的“连点 3/5 次开心/生气”彩蛋与单击切换跟随冲突（每次点击都会切换状态），
-  // 已让位于跟随主交互；摸头长按、拖拽等其它彩蛋仍然保留。
+  // 单击专用于切换跟随；摸头长按、拖拽等彩蛋保留在其它交互里。
 }
 
 function scheduleHover() {
@@ -602,8 +601,7 @@ function currentStateSnapshot() {
     mood: Math.round(mood * 10) / 10,
     fatigue: Math.round(fatigue * 10) / 10,
     affection,
-    lastDaily,
-    lastInteract: lastInteraction
+    lastDaily
   };
 }
 
@@ -674,7 +672,7 @@ function handleCommand(cmd) {
   else if (cmd.type === 'state:reload') reloadState();
   else if (cmd.type === 'skin:reload') loadSkin(currentSkin).catch((err) => console.warn('[pet] 皮肤重载失败', err));
   else if (cmd.type === 'say') bubble(cmd.text, 3000);
-  else if (cmd.type === 'follow:toggle') api.followToggle();
+  // follow:toggle 由主进程统一裁决，不会转发到这里
 }
 
 function startPomodoro() {

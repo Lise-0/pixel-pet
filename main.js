@@ -25,12 +25,10 @@ Object.assign(ctx, {
 
 ctx.DATA_DIR = utils.resolveDataDir(ctx.app);
 ctx.app.setPath('userData', ctx.DATA_DIR);
-ctx.debugLog = utils.debugLog;
 const { debugLog } = utils;
 
 // 装配各功能模块：模块把方法挂到 ctx 上，跨模块调用统一走 ctx，避免循环依赖
 const { Store } = require('./lib/store');
-require('./lib/config');
 require('./lib/window').attach();
 require('./lib/metrics').attach(ctx);
 require('./lib/tray').attach(ctx);

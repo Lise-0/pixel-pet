@@ -18,7 +18,6 @@ contextBridge.exposeInMainWorld('pet', {
   skinInspect: (paths) => ipcRenderer.invoke('skins:inspect', paths),
   skinImport: (payload) => ipcRenderer.invoke('skins:import', payload),
   skinRemove: (id) => ipcRenderer.invoke('skins:remove', id),
-  skinOpenDir: () => ipcRenderer.invoke('skins:open-dir'),
   skinUserDir: () => ipcRenderer.invoke('skins:user-dir'),
   // 拖拽进窗口的 File 必须先在 preload 里换成真实路径，渲染层拿不到绝对路径
   pathForFile: (file) => {

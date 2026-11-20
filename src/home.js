@@ -57,18 +57,26 @@ function pushStateTrend(mood, fatigue) {
   drawStateTrend();
 }
 
-function drawStateTrend() {
-  const cv = $('stateTrend');
-  if (!cv) return;
+/**
+ * 按设备像素比初始化图表画布：尺寸仅在变化时重设（避免每帧清空上下文状态），
+ * 返回可直接以 CSS 像素坐标绘制的 2D 上下文。两处图表共用，避免重复的 DPR 样板代码。
+ */
+function setupChartCanvas(cv, fallbackWidth, cssHeight) {
   const dpr = window.devicePixelRatio || 1;
-  const w = cv.clientWidth || 220;
-  const h = 44;
+  const w = cv.clientWidth || fallbackWidth;
   const pw = Math.round(w * dpr);
-  const ph = Math.round(h * dpr);
+  const ph = Math.round(cssHeight * dpr);
   if (cv.width !== pw || cv.height !== ph) { cv.width = pw; cv.height = ph; }
   const c = cv.getContext('2d');
   c.setTransform(dpr, 0, 0, dpr, 0, 0);
-  c.clearRect(0, 0, w, h);
+  c.clearRect(0, 0, w, cssHeight);
+  return { c, w, h: cssHeight };
+}
+
+function drawStateTrend() {
+  const cv = $('stateTrend');
+  if (!cv) return;
+  const { c, w, h } = setupChartCanvas(cv, 220, 44);
 
   // 淡色参考线：25% / 50% / 75%
   c.strokeStyle = 'rgba(150,125,100,.12)';
@@ -449,7 +457,7 @@ function bindButtons() {
     syncSettingsUI();
     updateQuickButtons();
   });
-  // 不再弹出独立设置窗口，直接切到本页的“设置”Tab
+  // 设置就在本页，直接切到“设置”Tab
   $('openSettings').addEventListener('click', () => switchTab('settings'));
   $('openAssets').addEventListener('click', () => api.command({ type: 'open-assets-dir' }));
   $('openBuiltin').addEventListener('click', () => api.command({ type: 'open-builtin-skins-dir' }));
@@ -554,15 +562,7 @@ function renderFocusStats(summary) {
 
   const cv = $('focusChart');
   if (!cv || !summary.days) return;
-  const dpr = window.devicePixelRatio || 1;
-  const w = cv.clientWidth || 320;
-  const h = 90;
-  const pw = Math.round(w * dpr);
-  const ph = Math.round(h * dpr);
-  if (cv.width !== pw || cv.height !== ph) { cv.width = pw; cv.height = ph; }
-  const c = cv.getContext('2d');
-  c.setTransform(dpr, 0, 0, dpr, 0, 0);
-  c.clearRect(0, 0, w, h);
+  const { c, w, h } = setupChartCanvas(cv, 320, 90);
 
   const days = summary.days;
   const max = Math.max(25, ...days.map((d) => d.minutes || 0));

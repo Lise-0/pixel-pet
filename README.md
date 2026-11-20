@@ -21,7 +21,7 @@
 ```bash
 npm install
 npm start        # 启动桌宠
-npm run dev      # 开发模式（带 DevTools）
+npm run dev      # 开发调试模式：启动并开放 9223 调试端口
 ```
 
 打包 Windows 安装包：
@@ -34,7 +34,7 @@ npm run build:dir    # 仅生成目录版
 ## 测试
 
 ```bash
-npm test             # 单元测试 + 端到端测试
+npm test             # 单元测试 + 端到端测试（E2E 需调试端口，未启动则跳过）
 npm run test:unit    # 仅单元测试（纯 Node，无需 Electron）
 npm run test:e2e     # 仅端到端测试
 ```

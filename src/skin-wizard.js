@@ -84,7 +84,6 @@
     raf: 0,
     previewGen: 0,      // 预览动画代次令牌：每次启停递增，作废尚未完成的异步加载与旧循环
     previewImgs: [],
-    result: null,
     edit: null,         // 编辑态：{ originalId, builtin }；普通导入为 null
     debounce: 0         // 拆帧参数防抖定时器，关闭向导时清理
   };
@@ -332,7 +331,6 @@
     S.kind = info.kind;
     S.skipStep2 = info.kind === 'pack';
     S.manifest = null;
-    S.result = null;
     S.autoFrameCount = -1;
     showError('');
 
@@ -972,7 +970,6 @@
         res = await api.skinImport(buildPayload(true));
       }
       if (!res.ok) throw new Error(res.error || '导入失败');
-      S.result = res;
       stopPreview();
       document.querySelectorAll('.wz-step').forEach((el) => { el.hidden = true; });
       $('wzDone').hidden = false;
@@ -1137,7 +1134,6 @@
     S.source = null;
     S.kind = 'pack';
     S.skipStep2 = true;
-    S.result = null;
     S.autoFrameCount = -1;
 
     // 组装成 skinInspect 的 pack 结构，复用现成的预填逻辑
@@ -1218,7 +1214,6 @@
     S.userDir = '';
     S.idEdited = false;
     S.busy = false;
-    S.result = null;
     S.edit = null;
     S.previewImgs = [];
     ['wzName', 'wzDesc', 'wzId', 'wzPersona', 'wzNewAction'].forEach((id) => {
@@ -1231,8 +1226,6 @@
     if (grid) grid.innerHTML = '';
     const strip = $('wzFrameStrip');
     if (strip) strip.innerHTML = '';
-    const sheet = $('wzSheetPreview');
-    if (sheet) sheet.innerHTML = '';
     showError('');
   }
 
