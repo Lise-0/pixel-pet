@@ -100,6 +100,7 @@ let followClickAt = 0;       // 跟随点击专用防抖
 
 let bubbleTimer = null;
 let hoverTimer = null;
+let hintTimer = null;            // 跟随状态轻提示的收起计时
 let stateTimers = [];           // 养成/存盘/待机定时器句柄，卸载时统一清理
 let pomodoro = null;
 let pomodoroTimer = null;
@@ -232,10 +233,10 @@ async function init() {
     stateTimers = [];
     // 其余一次性/循环句柄也一并清理，避免热重载或嵌入场景下空转。
     // clearTimeout 与 clearInterval 在浏览器中共用同一 ID 池，可交叉清除。
-    [bubbleTimer, hoverTimer, pomodoroTimer, pomodoroBlipTimer].forEach((t) => {
+    [bubbleTimer, hoverTimer, hintTimer, pomodoroTimer, pomodoroBlipTimer].forEach((t) => {
       if (t) { clearTimeout(t); clearInterval(t); }
     });
-    bubbleTimer = hoverTimer = pomodoroTimer = pomodoroBlipTimer = null;
+    bubbleTimer = hoverTimer = hintTimer = pomodoroTimer = pomodoroBlipTimer = null;
     persistStateOnUnload();
   });
 }
@@ -322,8 +323,10 @@ function overPet(clientX, clientY) {
 
   const frame = frames[view.name];
   if (frame && frame.mask) {
-    for (let oy = -2; oy <= 2; oy += 1) {
-      for (let ox = -2; ox <= 2; ox += 1) {
+    // 命中容差放宽到 3px：鼠标刚靠近猫身就解除穿透，避免"移上去立刻点"的第一下
+    // 还落在穿透状态里被桌面吃掉（IPC 切换穿透有往返延迟）。
+    for (let oy = -3; oy <= 3; oy += 1) {
+      for (let ox = -3; ox <= 3; ox += 1) {
         const x = ix + ox;
         const y = iy + oy;
         if (x >= 0 && y >= 0 && x < view.w && y < view.h && frame.mask[y * view.w + x]) return true;
@@ -332,8 +335,8 @@ function overPet(clientX, clientY) {
     return false;
   }
   const bbox = frame ? frame.bbox : { x: 0, y: 0, w: view.w, h: view.h };
-  return ix >= bbox.x - 2 && ix <= bbox.x + bbox.w + 2 &&
-         iy >= bbox.y - 2 && iy <= bbox.y + bbox.h + 2;
+  return ix >= bbox.x - 3 && ix <= bbox.x + bbox.w + 3 &&
+         iy >= bbox.y - 3 && iy <= bbox.y + bbox.h + 3;
 }
 
 function updateIgnore() {
@@ -457,6 +460,9 @@ function onFollowStartedFromMain() {
   // 气泡的深棕边框在 0.5 倍缩放的小窗口里像一块“选中黑框”，是之前误报的主要来源。
   clearTimeout(hoverTimer);
   hideBubble();
+  // 点下宠物时鼠标就在猫身上，处在「保持距离」圆环内，猫不会立刻移动、动作也几乎不变。
+  // 不给可见反馈的话，用户会以为这一下没点上（于是再点一下又关掉），看起来像跟随失灵。
+  showPetHint('跟随中 · 移动鼠标我会慢慢跟上', 2400);
   // 跟随过程不弹气泡：小窗口里 2px 深色硬边框的气泡几乎横跨半屏，
   // 看起来像人物背后贴了块黑色长方形。跟随时保持画面干净，只保留轻提示音。
   blip(720, 0.09);
@@ -487,6 +493,7 @@ function onFollowEndedFromMain() {
   lastInteraction = Date.now();
   // 停止跟随也保持画面干净，不把跟随时压住的气泡延迟放出来
   hideBubble();
+  showPetHint('已停止跟随', 1400);
   // 主进程已把窗口设回默认穿透；清掉本地缓存，强制按当前命中重新下发
   ignoring = null;
   hit = overPet(lastPointer.x, lastPointer.y);
@@ -497,8 +504,13 @@ function onFollowEndedFromMain() {
 }
 
 function handleClick() {
-  // 位置锁定期间点击不再请求跟随，避免出现“窗口移动但动作不变”的假跟随
-  if (locked) return;
+  // 位置锁定期间点击不再请求跟随，避免出现“窗口移动但动作不变”的假跟随。
+  // 但不能静默吞掉：用户会以为点击失灵，所以给一行轻提示说明原因。
+  if (locked) {
+    showPetHint('位置已锁定，先解锁才能跟随', 2000);
+    blip(360, 0.05);
+    return;
+  }
   const now = Date.now();
 
   // 单击切换“追随鼠标”：只向主进程发切换请求，状态由主进程裁决并回推，
@@ -764,6 +776,22 @@ function hideBubble() {
   bubbleEl.textContent = '';
 }
 
+/**
+ * 轻提示：跟随开关这类"点了却看不出变化"的操作必须有可见反馈。
+ * 不用气泡（有边框，小窗里像选中黑框），只用一行带白色描边的淡色文字。
+ */
+function showPetHint(text, ms = 1800) {
+  const el = document.getElementById('petHint');
+  if (!el || !text) return;
+  el.textContent = text;
+  el.classList.add('show');
+  clearTimeout(hintTimer);
+  hintTimer = setTimeout(() => {
+    el.classList.remove('show');
+    hintTimer = null;
+  }, ms);
+}
+
 function say(action, fallback) {
   const pool = persona[action];
   // 台词池必须是字符串数组：persona.txt 若把某段误配成字符串，
@@ -909,6 +937,34 @@ function draw(expr, t) {
   lastDraw = { name, dx, dy, w: frame.img.width, h: frame.img.height, mirror };
 
   drawExtras(expr, frame, dx, dy, t, mirror);
+  drawFollowMark();
+}
+
+/**
+ * 跟随中在脚下画一圈淡色光环：持续可见的状态指示，让"到底开没开"一眼可辨。
+ * 纯线条、无边框无底色，不会像气泡那样在小窗里被误看成"选中黑框"；
+ * 保持静态而非动画，因为待机只有 2fps，转动的小点会显得一跳一跳。
+ */
+function drawFollowMark() {
+  if (!following) return;
+  const fx = (skinPack && skinPack.effects) || {};
+  const color = fx.sleepZ || '#a9c2d6';
+  const y = Math.min(CH - 3, GROUND_Y - 1);
+  ctx.save();
+  ctx.globalAlpha = 0.6;
+  ctx.strokeStyle = color;
+  ctx.fillStyle = color;
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.ellipse(CW / 2, y, 34, 5, 0, 0, Math.PI * 2);
+  ctx.stroke();
+  for (let i = 0; i < 3; i++) {
+    const a = i * (Math.PI * 2 / 3) - Math.PI / 2;
+    ctx.beginPath();
+    ctx.arc(CW / 2 + Math.cos(a) * 34, y + Math.sin(a) * 5, 1.4, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
 }
 
 function drawExtras(expr, frame, dx, dy, t, mirror) {

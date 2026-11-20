@@ -7,6 +7,7 @@ let settings = null;
 let skins = [];
 let pomodoroRunning = false;
 let syncing = false;
+let followActive = false;       // 主进程广播的跟随状态，用于主控台按钮实时文案
 let clockTimer = null;          // 时钟定时器句柄
 let liveStateTimer = null;      // 状态拉取定时器句柄
 let previewRaf = 0;             // 预览动画帧句柄
@@ -363,6 +364,22 @@ function syncRange(el, raw, valId, suffix) {
 }
 
 /* ---------------- 快捷设置 ---------------- */
+
+/** 跟随按钮要显示真实状态：点下去了却毫无变化，最容易被当成"跟随失灵" */
+function renderFollowState(state) {
+  followActive = !!(state && state.active);
+  const btn = $('quickFollow');
+  if (!btn) return;
+  btn.classList.toggle('is-following', followActive);
+  const label = btn.querySelector('.quick-label b');
+  const sub = btn.querySelector('.quick-label small');
+  if (label) label.textContent = followActive ? '停止跟随' : '跟随鼠标';
+  if (sub) sub.textContent = followActive ? '正在慢慢跟着你' : '慢悠悠地跟着你';
+  const locked = !!(settings && settings.window && settings.window.locked);
+  btn.title = locked ? '位置已锁定，无法跟随鼠标'
+    : (followActive ? '正在跟随鼠标，点击停止' : '开始/停止跟随鼠标');
+}
+
 function syncSettingsUI() {
   if (!settings) return;
   syncing = true;
@@ -377,10 +394,8 @@ function syncSettingsUI() {
 
   $('qLock').checked = !!settings.window.locked;
   const followBtn = $('quickFollow');
-  if (followBtn) {
-    followBtn.disabled = !!settings.window.locked;
-    followBtn.title = settings.window.locked ? '位置已锁定，无法跟随鼠标' : '开始/停止跟随鼠标';
-  }
+  if (followBtn) followBtn.disabled = !!settings.window.locked;
+  renderFollowState(followActive);
   $('qPassthrough').checked = !!settings.window.passthrough;
   $('qRoam').checked = settings.system.roam !== false;
   $('qMonitor').checked = settings.system.monitor !== false;
@@ -692,6 +707,7 @@ async function init() {
   });
   api.onPomodoroStatus(renderPomodoro);
   if (api.onPomodoroStats) api.onPomodoroStats(renderFocusStats);
+  if (api.onFollowState) api.onFollowState(renderFollowState);
   if (api.onGotoTab) api.onGotoTab((tab) => switchTab(tab));
   // 所有 IPC 监听注册完成后回执主进程，主进程此时才补发可能待跳转的 Tab，
   // 避免首次打开时消息早于监听器注册而丢失。

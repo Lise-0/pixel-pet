@@ -155,6 +155,39 @@ class CDP {
     const r = await pet.ev(`typeof api.reportPomodoroComplete === 'function' ? 'ok' : 'fail'`);
     assert(r === 'ok', r);
   });
+  await check('跟随开关有可见反馈（轻提示，无边框黑框）', async () => {
+    try {
+      await pet.ev(`api.followToggle()`);
+      await new Promise((r) => setTimeout(r, 350));
+      const on = JSON.parse(await pet.ev(`JSON.stringify({
+        following, hint: document.getElementById('petHint').textContent,
+        shown: document.getElementById('petHint').classList.contains('show'),
+        border: getComputedStyle(document.getElementById('petHint')).borderTopWidth
+      })`));
+      await pet.ev(`api.followStop()`);
+      await new Promise((r) => setTimeout(r, 350));
+      const off = JSON.parse(await pet.ev(`JSON.stringify({
+        following, hint: document.getElementById('petHint').textContent
+      })`));
+      assert(on.following && on.shown && on.hint.includes('跟随中') && on.border === '0px', JSON.stringify(on));
+      assert(!off.following && off.hint.includes('已停止跟随'), JSON.stringify(off));
+    } finally {
+      await pet.ev(`api.followStop()`);
+    }
+  });
+  await check('跟随状态光环只在跟随中绘制', async () => {
+    const r = JSON.parse(await pet.ev(`(function(){
+      const old = following, orig = ctx.ellipse;
+      let n = 0;
+      ctx.ellipse = function(){ n += 1; return orig.apply(this, arguments); };
+      try {
+        following = false; drawFollowMark(); const idle = n;
+        following = true; drawFollowMark(); const active = n - idle;
+        return JSON.stringify({ idle, active });
+      } finally { ctx.ellipse = orig; following = old; }
+    })()`));
+    assert(r.idle === 0 && r.active === 1, JSON.stringify(r));
+  });
 
   console.log('\n[E2E] 主控台层');
   await check('皮肤列表与编辑入口', async () => {
@@ -179,6 +212,27 @@ class CDP {
   await check('好感整数显示', async () => {
     const r = await home.ev(`/^\\d+$/.test(document.getElementById('valAffection').textContent) ? 'ok' : 'fail'`);
     assert(r === 'ok', r);
+  });
+  await check('主控台跟随按钮实时显示状态', async () => {
+    try {
+      await home.ev(`api.command({type:"follow:toggle"})`);
+      await new Promise((r) => setTimeout(r, 400));
+      const on = JSON.parse(await home.ev(`JSON.stringify({
+        label: document.querySelector("#quickFollow .quick-label b").textContent,
+        active: document.getElementById("quickFollow").classList.contains("is-following"),
+        api: typeof api.onFollowState
+      })`));
+      await home.ev(`api.command({type:"follow:toggle"})`);
+      await new Promise((r) => setTimeout(r, 400));
+      const off = JSON.parse(await home.ev(`JSON.stringify({
+        label: document.querySelector("#quickFollow .quick-label b").textContent,
+        active: document.getElementById("quickFollow").classList.contains("is-following")
+      })`));
+      assert(on.api === 'function' && on.active && on.label === '停止跟随', JSON.stringify(on));
+      assert(!off.active && off.label === '跟随鼠标', JSON.stringify(off));
+    } finally {
+      await pet.ev(`api.followStop()`);
+    }
   });
   await check('状态趋势：无时间戳/过期数据丢弃，两条曲线成对还原', async () => {
     const r = JSON.parse(await home.ev(`(function(){

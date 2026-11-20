@@ -62,6 +62,31 @@ body {
   transform: translateX(-50%) translateY(0) scale(1);
 }
 
+/* 跟随状态提示：纯文字、无底色无边框，避免小窗里被误认成"选中黑框"。
+   白色描边让它在浅色/深色壁纸上都能读清。 */
+.pet-hint {
+  position: absolute;
+  left: 50%;
+  top: 6px;
+  z-index: 12;
+  padding: 0;
+  background: none;
+  border: 0;
+  color: #5b4638;
+  font: 11px/1.3 "Microsoft YaHei", "PingFang SC", sans-serif;
+  white-space: nowrap;
+  text-shadow: 0 1px 2px #fff, 0 0 4px #fff, 0 0 6px #fff;
+  opacity: 0;
+  transform: translateX(-50%) translateY(-4px);
+  transition: opacity 0.18s ease, transform 0.18s ease;
+  pointer-events: none;
+}
+
+.pet-hint.show {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
 .pomodoro-timer {
   position: absolute;
   left: 50%;

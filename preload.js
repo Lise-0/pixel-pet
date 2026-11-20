@@ -48,6 +48,7 @@ contextBridge.exposeInMainWorld('pet', {
   onFollowEnded: (cb) => ipcRenderer.on('follow:ended', () => cb()),
   onFollowStarted: (cb) => ipcRenderer.on('follow:started', () => cb()),
   onFollowMotion: (cb) => ipcRenderer.on('follow:motion', (event, info) => cb(info)),
+  onFollowState: (cb) => ipcRenderer.on('follow:state', (event, state) => cb(state)),
   onWanderEnded: (cb) => ipcRenderer.on('pet:wander-ended', (event, data) => cb(data)),
   onPomodoroStatus: (cb) => ipcRenderer.on('pomodoro:status', (event, data) => cb(data)),
   onPomodoroStats: (cb) => ipcRenderer.on('pomodoro:stats', (event, data) => cb(data)),
