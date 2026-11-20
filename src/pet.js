@@ -838,7 +838,7 @@ function fpsOf(expr) {
   // 用原始状态名 expr 判断而非 resolveAction 结果：皮肤在 triggers 里把 run 重映射成
   // 自定义动作（如 dash）时，跟随加速依然生效。
   if (following && followMoving && expr === 'run') {
-    fps *= 0.7 + followSpeed * 0.6;   // 0.7x ~ 1.3x
+    fps *= 0.55 + followSpeed * 0.75;   // 0.55x ~ 1.3x：慢速时步频明显放缓
   }
   return fps;
 }

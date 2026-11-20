@@ -13,6 +13,7 @@ const stats = require('../lib/pomodoro-stats');
 const { readZip } = require('../lib/skin-import');
 const skinImport = require('../lib/skin-import');
 const config = require('../lib/config');
+const { followParams, followStep, DEFAULT_LOOSENESS, FOLLOW_TICK_MS } = require('../lib/follow-params');
 const fsMod = require('node:fs');
 
 let passed = 0;
@@ -340,6 +341,68 @@ test('无 thumb/idle-1.png 时清单与完整包仍选中同一张兜底帧', ()
     config.invalidate();
     fs.rmSync(tmp, { recursive: true, force: true });
   }
+});
+
+/* ---------------- 鼠标跟随：松散缓随 ---------------- */
+test('跟随松紧：默认档与存档默认值一致，非法值回落并被夹取', () => {
+  assert.equal(DEFAULT_SETTINGS.pet.followLoose, DEFAULT_LOOSENESS);
+  assert.equal(followParams(undefined).looseness, DEFAULT_LOOSENESS);
+  assert.equal(followParams('bad').looseness, DEFAULT_LOOSENESS);
+  assert.equal(followParams(-20).looseness, 0);
+  assert.equal(followParams(999).looseness, 100);
+  assert.equal(followParams(0).tickMs, FOLLOW_TICK_MS);
+  assert.ok(FOLLOW_TICK_MS > 16, '轮询应比原来的 16ms 更慢');
+});
+
+test('跟随松紧：越松则保持距离越远、缓动越慢', () => {
+  const tight = followParams(0);
+  const loose = followParams(100);
+  assert.ok(loose.keepDist > tight.keepDist * 5, '松散档应与鼠标保持明显更远的距离');
+  assert.ok(loose.startGap > tight.startGap, '松散档起身更迟钝');
+  assert.ok(loose.easeMin < tight.easeMin && loose.easeMax < tight.easeMax, '松散档缓动更慢');
+  const def = followParams(DEFAULT_LOOSENESS);
+  assert.ok(def.keepDist >= 100, '默认保持距离应大于 100px，不再贴住光标');
+  assert.ok(def.easeMax < 0.07, '默认最快缓动也应低于旧实现的 0.11');
+});
+
+test('跟随收敛：停在保持距离外，而不是一路贴到光标上', () => {
+  const p = followParams(DEFAULT_LOOSENESS);
+  const mouse = 800;
+  let pos = 0;
+  let running = false;
+  for (let i = 0; i < 600; i++) {
+    const s = followStep(p, mouse - pos, 0);
+    if (!running && s.gap > p.startGap) running = true;
+    else if (running && s.gap < p.stopGap) running = false;
+    if (!running || s.dist <= 0) break;
+    pos += Math.round(s.step * 100) / 100;
+  }
+  const finalDist = mouse - pos;
+  assert.ok(finalDist >= p.keepDist * 0.95, `不应穿过保持距离，实际 ${finalDist}`);
+  assert.ok(finalDist < p.keepDist + p.stopGap + 20, `应停在保持距离外不远处，实际 ${finalDist}`);
+  assert.ok(finalDist > 80, `不应贴住光标（旧实现约 10px），实际 ${finalDist}`);
+});
+
+test('跟随单步：死区内不后退、速度档位合法、单步位移受限', () => {
+  const p = followParams(DEFAULT_LOOSENESS);
+  assert.equal(followStep(p, p.keepDist - 5, 0).step, 0, '鼠标更近时不该后退或前追');
+  const far = followStep(p, 2000, 0);
+  assert.ok(far.step > 0 && far.t >= 0 && far.t <= 1);
+  assert.ok(far.step < 2000 * 0.07, '单步位移应明显小于旧实现的全额 lerp');
+});
+
+test('跟随速度：默认档比原来的 16ms / 0.035 追法明显更慢', () => {
+  const p = followParams(DEFAULT_LOOSENESS);
+  const ticksTo90 = (ease) => Math.log(0.1) / Math.log(1 - ease);
+  const newMs = ticksTo90(p.easeMin) * p.tickMs;
+  const oldMs = ticksTo90(0.035) * 16;
+  assert.ok(newMs > oldMs * 1.5, `默认档应明显更慢（新 ${Math.round(newMs)}ms vs 旧 ${Math.round(oldMs)}ms）`);
+});
+
+test('设置校验：pet.followLoose 被夹在 0~100 且拒绝非数字', () => {
+  assert.equal(sanitizePatch({ pet: { followLoose: 250 } }).pet.followLoose, 100);
+  assert.equal(sanitizePatch({ pet: { followLoose: -3 } }).pet.followLoose, 0);
+  assert.equal(sanitizePatch({ pet: { followLoose: 'x' } }).pet.followLoose, undefined);
 });
 
 console.log(`\n[单测结果] 通过 ${passed}，失败 ${failed}`);

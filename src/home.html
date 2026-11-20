@@ -101,7 +101,7 @@
         <div class="quick-grid">
           <button id="quickFollow" class="quick-btn">
             <span class="quick-ico">🐾</span>
-            <span class="quick-label"><b>跟随鼠标</b><small>让它跑着来找你</small></span>
+            <span class="quick-label"><b>跟随鼠标</b><small>慢悠悠地跟着你</small></span>
           </button>
           <button id="quickGreet" class="quick-btn">
             <span class="quick-ico">💬</span>
@@ -214,6 +214,12 @@
 
         <div class="settings-card">
           <h3 class="card-title">行为</h3>
+          <div class="setting-row">
+            <label for="qFollowLoose">跟随松紧</label>
+            <input id="qFollowLoose" type="range" min="0" max="100" step="5" />
+            <b id="qFollowLooseVal">70%</b>
+          </div>
+          <p class="sub sub-tight">调高：与鼠标保持更远距离、慢悠悠地跟；调低：贴近鼠标紧跟。改动即时生效。</p>
           <label class="switch"><input id="qLock" type="checkbox" /><span>锁定位置（防止误拖动）</span></label>
           <label class="switch"><input id="qPassthrough" type="checkbox" /><span>鼠标穿透（宠物不可点击，需在托盘关闭）</span></label>
           <label class="switch"><input id="qRoam" type="checkbox" /><span>自由走动（空闲时散步）</span></label>

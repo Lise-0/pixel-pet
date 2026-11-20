@@ -328,7 +328,8 @@ const RANGE_ROWS = [
   { id: 'qScale', val: 'qScaleVal', suffix: '%', key: 'scale', fallback: 1, mul: 100 },
   { id: 'qOpacity', val: 'qOpacityVal', suffix: '%', key: 'opacity', fallback: 1, mul: 100 },
   { id: 'qVolume', val: 'qVolumeVal', suffix: '', key: 'volume', fallback: 60, mul: 1 },
-  { id: 'qActionRate', val: 'qActionRateVal', suffix: '%', key: 'actionRate', fallback: 1, mul: 100 }
+  { id: 'qActionRate', val: 'qActionRateVal', suffix: '%', key: 'actionRate', fallback: 1, mul: 100 },
+  { id: 'qFollowLoose', val: 'qFollowLooseVal', suffix: '%', key: 'followLoose', fallback: 70, mul: 1 }
 ];
 const rangeBusy = new Map();    // 用户正在拖动：设置广播不能回写覆盖，否则滑块会往回跳
 const rangeTimers = new Map();  // 拖动期间节流提交，避免每个 input 都发 IPC 并重设窗口尺寸
@@ -420,6 +421,7 @@ function bindSettings() {
     preview.rate = v / 100;
     api.patchSettings({ pet: { actionRate: v / 100 } });
   });
+  range('qFollowLoose', 'qFollowLooseVal', '%', (v) => api.patchSettings({ pet: { followLoose: v } }));
 
   const toggle = (id, key) => {
     $(id).addEventListener('change', (e) => api.patchSettings(key(e.target.checked)));
