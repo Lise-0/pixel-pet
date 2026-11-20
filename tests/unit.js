@@ -14,6 +14,7 @@ const { readZip } = require('../lib/skin-import');
 const skinImport = require('../lib/skin-import');
 const config = require('../lib/config');
 const { followParams, followStep, followHysteresis, DEFAULT_LOOSENESS, FOLLOW_TICK_MS } = require('../lib/follow-params');
+const { hoverHit } = require('../lib/hover-hit');
 const fsMod = require('node:fs');
 
 let passed = 0;
@@ -572,6 +573,24 @@ test('皮肤导入：清理 .tmp- 残留，并恢复回滚失败留下的 .old- 
     config.invalidate();
     fs.rmSync(tmp, { recursive: true, force: true });
   }
+});
+
+test('穿透判定：全局光标命中猫身矩形，边缘留余量', () => {
+  const bounds = { x: 1000, y: 400 };
+  const box = { x: 10, y: 62, w: 141, h: 114 };
+  // 光标在猫身正中
+  assert.equal(hoverHit({ x: 1050, y: 480 }, bounds, box), true);
+  // 左/上边缘外 3px（在 4px 余量内）仍可点——这正是修复"点了没反应"的关键
+  assert.equal(hoverHit({ x: 1006, y: 458 }, bounds, box), true);
+  // 超出余量就应该穿透，不吞桌面点击
+  assert.equal(hoverHit({ x: 1004, y: 480 }, bounds, box), false);
+  assert.equal(hoverHit({ x: 1050, y: 390 }, bounds, box), false);
+  // 下边缘（窗口底 y=180）：box.y+box.h=176，+4=180 仍可点
+  assert.equal(hoverHit({ x: 1100, y: 580 }, bounds, box), true);
+  // 数据缺失时保守穿透，宁可漏点也不吞桌面
+  assert.equal(hoverHit(null, bounds, box), false);
+  assert.equal(hoverHit({ x: 1050, y: 480 }, bounds, null), false);
+  assert.equal(hoverHit({ x: NaN, y: 480 }, bounds, box), false);
 });
 
 console.log(`\n[单测结果] 通过 ${passed}，失败 ${failed}`);

@@ -29,6 +29,8 @@ contextBridge.exposeInMainWorld('pet', {
 
   // 窗口行为
   setIgnoreMouse: (ignore) => ipcRenderer.send('pet:ignore-mouse', ignore),
+  // 猫身在窗口内的命中矩形，由主进程据此主动切换鼠标穿透
+  setHoverBox: (box) => ipcRenderer.send('pet:hover-box', box),
   dragStart: () => ipcRenderer.send('pet:drag-start'),
   dragEnd: () => ipcRenderer.send('pet:drag-end'),
   wanderStart: (dir, speed) => ipcRenderer.send('pet:wander-start', { dir, speed }),

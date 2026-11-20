@@ -93,6 +93,8 @@ let actionRate = 1;      // 动作频率倍率（设置项 pet.actionRate），�
 let hit = false;
 let lastPointer = { x: -1, y: -1 };   // 最近一次鼠标位置，用于穿透状态重算
 let ignoring = null;
+let hoverBox = null;                  // 猫身在窗口内的矩形，供主进程主动判定穿透
+let lastHoverBoxSent = null;
 let down = null;
 let longTimer = null;
 let moved = false;
@@ -209,7 +211,8 @@ async function init() {
   requestAnimationFrame(loop);
 
   applySettings(settings);
-  api.setIgnoreMouse(true);
+  // 穿透由主进程在创建窗口时设为 true，并按全局光标位置持续判定，
+  // 这里不再下发 setIgnoreMouse（IPC 往返会让第一下点击被窗口吞掉）。
 
   // 用包装函数统一做可见性判断：窗口隐藏（如切换到其它应用导致桌宠最小化）时
   // 跳过状态计算与存盘，避免无谓的 IPC 和磁盘写入。函数本身不变，便于测试直接调用。
@@ -340,12 +343,34 @@ function overPet(clientX, clientY) {
 }
 
 function updateIgnore() {
-  if (dragging || following) return; // 跟随期间穿透由主进程按全局鼠标位置控制
-  const shouldIgnore = forcePassthrough || !hit;
-  if (shouldIgnore !== ignoring) {
-    ignoring = shouldIgnore;
-    api.setIgnoreMouse(shouldIgnore);
-  }
+  if (dragging || following) return;
+  // 穿透已由主进程按全局光标位置主动切换，这里只维护本地镜像供状态展示/测试。
+  // 不再发 IPC：往返的几毫秒里 pointerdown 会被窗口吞掉，表现为"点了没反应、拖不动"。
+  ignoring = forcePassthrough || !hit;
+}
+
+/**
+ * 把猫身在窗口内的矩形同步给主进程，由主进程按全局光标位置主动切穿透。
+ * 画布坐标要按 canvas 实际 CSS 尺寸换算回窗口坐标，才能适配缩放与 DPR。
+ * 变化不足 2px 时不重发，避免逐帧刷 IPC。
+ */
+function syncHoverBox() {
+  if (!api || typeof api.setHoverBox !== 'function') return;
+  const rect = canvas.getBoundingClientRect();
+  if (!rect.width || !rect.height) return;
+  const box = hoverBox
+    ? {
+        x: Math.round(hoverBox.x * (rect.width / CW)),
+        y: Math.round(hoverBox.y * (rect.height / CH)),
+        w: Math.round(hoverBox.w * (rect.width / CW)),
+        h: Math.round(hoverBox.h * (rect.height / CH))
+      }
+    : { x: 0, y: 0, w: 0, h: 0 };
+  const p = lastHoverBoxSent;
+  if (p && Math.abs(box.x - p.x) < 2 && Math.abs(box.y - p.y) < 2 &&
+      Math.abs(box.w - p.w) < 2 && Math.abs(box.h - p.h) < 2) return;
+  lastHoverBoxSent = box;
+  api.setHoverBox(box);
 }
 
 /* ---------------- 交互识别 ---------------- */
@@ -909,6 +934,8 @@ function draw(expr, t) {
   const list = availableFrames(expr);
   if (!list.length) {
     lastDraw = null;
+    hoverBox = null;
+    syncHoverBox();
     return;
   }
   const act = actionConfig[resolveAction(expr)] || {};
@@ -935,6 +962,10 @@ function draw(expr, t) {
   ctx.drawImage(frame.img, dx, dy);
   ctx.restore();
   lastDraw = { name, dx, dy, w: frame.img.width, h: frame.img.height, mirror };
+  // 猫身矩形用整张帧的绘制范围（不是透明像素 mask）：宁可边缘多 4px 可点，
+  // 也不要因为 mask 边缘的锯齿把用户的点击漏成"穿透到桌面"。
+  hoverBox = { x: dx, y: dy, w: frame.img.width, h: frame.img.height };
+  syncHoverBox();
 
   drawExtras(expr, frame, dx, dy, t, mirror);
   drawFollowMark();
