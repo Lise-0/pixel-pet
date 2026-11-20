@@ -38,6 +38,8 @@ contextBridge.exposeInMainWorld('pet', {
   followToggle: () => ipcRenderer.send('pet:follow-toggle'),
   followStop: () => ipcRenderer.send('pet:follow-stop'),
   reportPomodoro: (status) => ipcRenderer.send('pomodoro:status', status),
+  reportPomodoroComplete: (result) => ipcRenderer.send('pomodoro:complete', result),
+  getPomodoroStats: () => ipcRenderer.invoke('pomodoro:stats'),
 
   // 主进程推送
   onSettings: (cb) => ipcRenderer.on('settings:changed', (event, data) => cb(data)),
@@ -49,6 +51,7 @@ contextBridge.exposeInMainWorld('pet', {
   onFollowMotion: (cb) => ipcRenderer.on('follow:motion', (event, info) => cb(info)),
   onWanderEnded: (cb) => ipcRenderer.on('pet:wander-ended', (event, data) => cb(data)),
   onPomodoroStatus: (cb) => ipcRenderer.on('pomodoro:status', (event, data) => cb(data)),
+  onPomodoroStats: (cb) => ipcRenderer.on('pomodoro:stats', (event, data) => cb(data)),
   onGotoTab: (cb) => ipcRenderer.on('home:goto-tab', (event, tab) => cb(tab)),
   getPomodoro: () => ipcRenderer.invoke('pomodoro:get')
 });

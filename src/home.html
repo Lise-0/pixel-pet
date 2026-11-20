@@ -127,9 +127,26 @@
         </div>
 
         <div class="stat-grid">
-          <div class="stat"><b id="statPomodoro">--</b><span>专注分钟</span></div>
+          <div class="stat"><b id="statPomodoro">--</b><span>今日专注分钟</span></div>
           <div class="stat"><b id="statAffection">--</b><span>累计好感</span></div>
           <div class="stat"><b id="statSkin">1</b><span>可用皮肤</span></div>
+        </div>
+
+        <div class="section-title">专注记录 <small id="focusStreak">坚持 0 天</small></div>
+        <div class="focus-card">
+          <div class="focus-head">
+            <div>
+              <b id="focusTodayCount">0</b><span>今日番茄</span>
+            </div>
+            <div>
+              <b id="focusTotalCount">0</b><span>累计番茄</span>
+            </div>
+            <div>
+              <b id="focusWeekMinutes">0</b><span>近7天分钟</span>
+            </div>
+          </div>
+          <canvas id="focusChart" height="90"></canvas>
+          <p class="focus-hint">每次专注结束会自动记一笔，休息结束也计入统计。</p>
         </div>
       </section>
 
@@ -229,6 +246,7 @@
             </div>
             <button id="qPomodoroBtn" class="btn">开始专注</button>
           </div>
+          <label class="switch"><input id="qNotify" type="checkbox" /><span>阶段结束弹出系统通知</span></label>
         </div>
 
         <div class="settings-card">

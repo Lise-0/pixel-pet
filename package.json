@@ -6,6 +6,9 @@
   "scripts": {
     "start": "electron .",
     "dev": "electron . --dev",
+    "test": "node tests/run.js",
+    "test:unit": "node tests/unit.js",
+    "test:e2e": "node tests/e2e.js",
     "build": "electron-builder --win",
     "build:dir": "electron-builder --win --dir",
     "pack": "electron-builder"

@@ -669,7 +669,7 @@ function startPomodoro() {
   if (following && api.followStop) api.followStop();
   facing = 1;
   const focusMin = Math.max(1, Number(settings.pomodoro.focus) || 25);
-  pomodoro = { phase: 'focus', endAt: Date.now() + focusMin * 60000 };
+  pomodoro = { phase: 'focus', endAt: Date.now() + focusMin * 60000, minutes: focusMin };
   setOverride('read', focusMin * 60000);
   renderPomodoroTimer();
   bubble(`一起专注 ${focusMin} 分钟吧！`, 3200);
@@ -701,7 +701,11 @@ function pomodoroTick() {
 
   if (pomodoro.phase === 'focus') {
     const breakMin = Math.max(1, Number(settings.pomodoro.break) || 5);
-    pomodoro = { phase: 'break', endAt: Date.now() + breakMin * 60000 };
+    // 上报专注完成：主进程负责落盘统计与系统通知
+    if (api.reportPomodoroComplete) {
+      api.reportPomodoroComplete({ phase: 'focus', minutes: pomodoro.minutes || focusMin, at: Date.now() });
+    }
+    pomodoro = { phase: 'break', endAt: Date.now() + breakMin * 60000, minutes: breakMin };
     renderPomodoroTimer();
     mood = clamp(mood + 6, 0, 100);
     affection += 3;
@@ -713,6 +717,9 @@ function pomodoroTick() {
     clearTimeout(pomodoroBlipTimer);
     pomodoroBlipTimer = setTimeout(() => blip(1180, 0.12), 160);
   } else {
+    if (api.reportPomodoroComplete) {
+      api.reportPomodoroComplete({ phase: 'break', minutes: pomodoro.minutes || 5, at: Date.now() });
+    }
     stopPomodoro(true);
     bubble('休息结束，继续加油！', 3000);
     setOverride('happy', 2500);

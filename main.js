@@ -19,7 +19,8 @@ Object.assign(ctx, {
   nativeImage: electron.nativeImage,
   globalShortcut: electron.globalShortcut,
   powerMonitor: electron.powerMonitor,
-  shell: electron.shell
+  shell: electron.shell,
+  Notification: electron.Notification
 });
 
 ctx.DATA_DIR = utils.resolveDataDir(ctx.app);

@@ -396,6 +396,21 @@ kbd {
 .stat b { display: block; font-size: 22px; color: var(--text); font-variant-numeric: tabular-nums; }
 .stat span { color: var(--text-3); font-size: 11px; }
 
+/* 专注记录卡片 */
+.focus-card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  box-shadow: var(--shadow-sm);
+}
+.focus-head { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 12px; }
+.focus-head > div { text-align: center; }
+.focus-head b { display: block; font-size: 20px; color: var(--accent-deep); font-variant-numeric: tabular-nums; }
+.focus-head span { font-size: 10px; color: var(--text-3); }
+#focusChart { display: block; width: 100%; height: 90px; }
+.focus-hint { margin: 8px 0 0; font-size: 10px; color: var(--text-3); line-height: 1.5; }
+
 /* ---------- 换皮肤 ---------- */
 .panel-head { margin-bottom: 12px; }
 .panel-head h2 { margin-bottom: 2px; }

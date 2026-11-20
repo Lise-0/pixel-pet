@@ -369,6 +369,8 @@ function syncSettingsUI() {
   $('qShowHome').checked = homeCfg.showOnStartup !== false;
   $('qFocus').value = settings.pomodoro.focus;
   $('qBreak').value = settings.pomodoro.break;
+  const notifyEl = $('qNotify');
+  if (notifyEl) notifyEl.checked = settings.pomodoro.notify !== false;
   $('toggleVisible').textContent = settings.window.visible === false ? '显示宠物' : '隐藏宠物';
   syncing = false;
 }
@@ -431,6 +433,12 @@ function bindSettings() {
   };
   number('qFocus', 'focus', 1, 120);
   number('qBreak', 'break', 1, 60);
+  const notifyEl = $('qNotify');
+  if (notifyEl) {
+    notifyEl.addEventListener('change', (e) => {
+      if (!syncing) api.patchSettings({ pomodoro: { notify: e.target.checked } });
+    });
+  }
 }
 
 function bindButtons() {
@@ -460,6 +468,7 @@ function bindButtons() {
     settings = await api.getSettings();
     syncSettingsUI();
     renderPetInfo();
+    refreshFocusStats();
   });
 
   // 关于页快捷互动
@@ -533,6 +542,75 @@ function updateQuickButtons() {
   }
 }
 
+/* ---------------- 番茄钟统计 ---------------- */
+function renderFocusStats(summary) {
+  if (!summary) return;
+  const set = (id, value) => { const el = $(id); if (el) el.textContent = value; };
+  set('statPomodoro', summary.todayMinutes || 0);
+  set('focusTodayCount', summary.todayCount || 0);
+  set('focusTotalCount', summary.totalCount || 0);
+  set('focusWeekMinutes', summary.days ? summary.days.reduce((s, d) => s + (d.minutes || 0), 0) : 0);
+  set('focusStreak', `坚持 ${summary.streak || 0} 天`);
+
+  const cv = $('focusChart');
+  if (!cv || !summary.days) return;
+  const dpr = window.devicePixelRatio || 1;
+  const w = cv.clientWidth || 320;
+  const h = 90;
+  const pw = Math.round(w * dpr);
+  const ph = Math.round(h * dpr);
+  if (cv.width !== pw || cv.height !== ph) { cv.width = pw; cv.height = ph; }
+  const c = cv.getContext('2d');
+  c.setTransform(dpr, 0, 0, dpr, 0, 0);
+  c.clearRect(0, 0, w, h);
+
+  const days = summary.days;
+  const max = Math.max(25, ...days.map((d) => d.minutes || 0));
+  const pad = { l: 24, r: 6, t: 8, b: 20 };
+  const chartH = h - pad.t - pad.b;
+  const chartW = w - pad.l - pad.r;
+  const slot = chartW / days.length;
+  const barW = Math.min(26, slot * 0.6);
+
+  c.strokeStyle = 'rgba(150,125,100,.14)';
+  c.lineWidth = 1;
+  [0, 0.5, 1].forEach((p) => {
+    const y = Math.round(pad.t + chartH * p) + 0.5;
+    c.beginPath(); c.moveTo(pad.l, y); c.lineTo(w - pad.r, y); c.stroke();
+  });
+  c.font = '10px ' + (getComputedStyle(document.body).fontFamily || 'sans-serif');
+  c.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--text-3').trim() || '#999';
+  c.textAlign = 'right';
+  [max, max / 2, 0].forEach((v, i) => {
+    c.fillText(String(Math.round(v)), pad.l - 5, pad.t + chartH * (i / 2) + 3);
+  });
+
+  const css = getComputedStyle(document.documentElement);
+  const accent = css.getPropertyValue('--accent').trim() || '#e8a06b';
+  days.forEach((d, i) => {
+    const x = pad.l + slot * i + (slot - barW) / 2;
+    const mins = d.minutes || 0;
+    const bh = mins > 0 ? Math.max(3, (mins / max) * chartH) : 0;
+    c.fillStyle = mins > 0 ? accent : 'rgba(150,125,100,.18)';
+    if (bh > 0) {
+      c.beginPath();
+      c.roundRect(x, pad.t + chartH - bh, barW, bh, 3);
+      c.fill();
+    }
+    c.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--text-3').trim() || '#999';
+    c.textAlign = 'center';
+    const date = new Date(d.key + 'T00:00:00');
+    c.fillText(i === days.length - 1 ? '今天' : `${date.getMonth() + 1}/${date.getDate()}`, x + barW / 2, h - 5);
+  });
+}
+
+async function refreshFocusStats() {
+  try {
+    const summary = await api.getPomodoroStats();
+    renderFocusStats(summary);
+  } catch (err) { /* 统计不可用时保留上次显示 */ }
+}
+
 function renderPomodoro(status) {
   pomodoroRunning = !!status.running;
   $('qPomodoroBtn').textContent = pomodoroRunning ? '停止专注' : '开始专注';
@@ -545,7 +623,6 @@ function renderPomodoro(status) {
   const mm = String(Math.floor(remain / 60000)).padStart(2, '0');
   const ss = String(Math.floor((remain % 60000) / 1000)).padStart(2, '0');
   $('qPomodoroStatus').textContent = (status.phase === 'focus' ? '专注中 ' : '休息中 ') + mm + ':' + ss;
-  $('statPomodoro').textContent = '进行中';
 }
 
 /* ---------------- 初始化 ---------------- */
@@ -585,6 +662,7 @@ async function init() {
     const status = await api.getPomodoro();
     if (status) renderPomodoro(status);
   } catch (err) { /* 状态不可用时保持默认显示 */ }
+  refreshFocusStats();
 
   api.onSettings((next) => {
     const prevSkin = settings && settings.pet && settings.pet.skin;
@@ -599,6 +677,7 @@ async function init() {
     }
   });
   api.onPomodoroStatus(renderPomodoro);
+  if (api.onPomodoroStats) api.onPomodoroStats(renderFocusStats);
   if (api.onGotoTab) api.onGotoTab((tab) => switchTab(tab));
 
   // 向导完成导入后：重扫皮肤目录，并按用户勾选决定是否立刻换上新皮肤
