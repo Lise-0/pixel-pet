@@ -99,9 +99,9 @@ function renderPetInfo() {
   $('barFatigue').style.width = fatigue + '%';
   $('valFatigue').textContent = Math.round(fatigue);
   $('barAffection').style.width = Math.min(100, affection) + '%';
-  $('valAffection').textContent = affection;
+  $('valAffection').textContent = Math.round(affection);
 
-  $('statAffection').textContent = affection;
+  $('statAffection').textContent = Math.round(affection);
   const activeSkin = skins.find((s) => s.id === (settings.pet && settings.pet.skin));
   $('petName').textContent = activeSkin ? activeSkin.name : '我的伙伴';
   $('petDesc').textContent = activeSkin && activeSkin.desc ? activeSkin.desc : '正在陪你工作～';
@@ -493,10 +493,14 @@ async function init() {
 
   // 向导完成导入后：重扫皮肤目录，并按用户勾选决定是否立刻换上新皮肤
   document.addEventListener('skins:changed', async (event) => {
-    await refreshSkins(true);
-    const detail = event.detail || {};
-    if (detail.activate && detail.id) {
-      await api.patchSettings({ pet: { skin: detail.id } });
+    try {
+      await refreshSkins(true);
+      const detail = event.detail || {};
+      if (detail.activate && detail.id) {
+        await api.patchSettings({ pet: { skin: detail.id } });
+      }
+    } catch (err) {
+      console.warn('[home] 皮肤变更处理失败', err);
     }
   });
 }

@@ -84,7 +84,8 @@
     raf: 0,
     previewImgs: [],
     result: null,
-    edit: null          // 编辑态：{ originalId, builtin }；普通导入为 null
+    edit: null,         // 编辑态：{ originalId, builtin }；普通导入为 null
+    debounce: 0         // 拆帧参数防抖定时器，关闭向导时清理
   };
 
   const TEMPLATE = `
@@ -129,7 +130,7 @@
         </div>
         <div class="wz-guide-item">
           <i>3</i>
-          <div><b>尺寸与对齐</b><p>每格／每张尺寸一致，角色居中、贴底，头顶留点空白别顶到边。向导会统一到 160×200 画布并贴底对齐；原图排太满会裁到头顶。</p></div>
+          <div><b>尺寸与对齐</b><p>每格／每张尺寸一致，角色居中、贴底，头顶留点空白别顶到边。向导会统一到 160×180 画布并贴底对齐；原图排太满会裁到头顶。</p></div>
         </div>
         <div class="wz-guide-item">
           <i>4</i>
@@ -955,8 +956,11 @@
     btn.textContent = editing ? '正在保存…' : '正在导入…';
     showError('');
     try {
-      // 编辑态：直接覆盖目标 ID（内置皮肤另存时 ID 已被换成新值，不会误覆盖）
-      let res = await api.skinImport(buildPayload(editing));
+      // 编辑态允许覆盖的是"原皮肤"本身：仅当当前 ID 与原 ID 相同时才用 overwrite。
+      // 若用户在编辑态把 ID 改成了另一个已有皮肤，必须走 EXISTS 确认流程，
+      // 否则会静默覆盖掉那款不相干的皮肤（内置皮肤另存副本时 ID 已变成新值，天然走确认流程）。
+      const sameId = editing && $('wzId').value.trim().toLowerCase() === String(S.edit.originalId).toLowerCase();
+      let res = await api.skinImport(buildPayload(sameId));
       if (!res.ok && res.code === 'EXISTS') {
         const ok = window.confirm(`已经有一个叫「${$('wzId').value.trim()}」的皮肤了，覆盖它吗？`);
         if (!ok) return;
@@ -1031,11 +1035,10 @@
     });
 
     // 拆帧参数变化：防抖重算，避免每敲一个数字就全量处理
-    let debounce = 0;
     const onOptionChange = () => {
       $('wzTolVal').textContent = $('wzTolerance').value;
-      clearTimeout(debounce);
-      debounce = setTimeout(rebuildFrames, 120);
+      clearTimeout(S.debounce);
+      S.debounce = setTimeout(rebuildFrames, 120);
     };
     ['wzCols', 'wzRows', 'wzRemoveBg', 'wzBgColor', 'wzTolerance', 'wzTrim', 'wzFrameW', 'wzFrameH', 'wzFit']
       .forEach((id) => {
@@ -1111,8 +1114,7 @@
     if (!S.mounted) mount();
     const layer = $('wizardLayer');
     if (!layer) return;
-    stopPreview();
-    showError('');
+    resetState();
     let pack;
     try {
       pack = await api.readSkin(id);
@@ -1194,19 +1196,53 @@
     }
   }
 
+  /** 清空上一次会话的素材/表单/预览状态，保证每次打开都是全新向导 */
+  function resetState() {
+    stopPreview();
+    clearTimeout(S.debounce);
+    S.debounce = 0;
+    S.step = 1;
+    S.source = null;
+    S.kind = 'sheet';
+    S.skipStep2 = false;
+    S.rawImages = [];
+    S.frames = [];
+    S.rows = [];
+    S.autoFrameCount = -1;
+    S.manifest = null;
+    S.userDir = '';
+    S.idEdited = false;
+    S.busy = false;
+    S.result = null;
+    S.edit = null;
+    S.previewImgs = [];
+    ['wzName', 'wzDesc', 'wzId', 'wzPersona', 'wzNewAction'].forEach((id) => {
+      const el = $(id);
+      if (el) el.value = '';
+    });
+    const activate = $('wzActivate');
+    if (activate) activate.checked = true;
+    const grid = $('wzFrameGrid');
+    if (grid) grid.innerHTML = '';
+    const strip = $('wzFrameStrip');
+    if (strip) strip.innerHTML = '';
+    const sheet = $('wzSheetPreview');
+    if (sheet) sheet.innerHTML = '';
+    showError('');
+  }
+
   function open() {
     if (!S.mounted) mount();
     const layer = $('wizardLayer');
     if (!layer) return;
-    S.edit = null;
+    resetState();
     layer.hidden = false;
     document.body.classList.add('wizard-open');
     setStep(1);
-    showError('');
   }
 
   function close() {
-    stopPreview();
+    resetState();
     const layer = $('wizardLayer');
     if (layer) layer.hidden = true;
     document.body.classList.remove('wizard-open');

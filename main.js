@@ -105,7 +105,9 @@ if (!gotLock) {
 
     ctx.app.on('activate', () => {
       if (!ctx.petWindow) ctx.createPetWindow();
-      else ctx.petWindow.showInactive();
+      else if (ctx.store.data.window.visible !== false) ctx.petWindow.showInactive();
+      // 用户此前用托盘隐藏了宠物时，点 Dock 图标不应绕过隐藏状态把宠物显示出来
+      // 却让托盘菜单/设置里的 visible 仍为 false，造成状态撕裂。
     });
   }).catch((err) => {
     debugLog('whenReady failed ' + (err && err.stack));
@@ -123,6 +125,8 @@ if (!gotLock) {
     if (ctx.dragTimer) clearInterval(ctx.dragTimer);
     if (ctx.wanderTimer) clearInterval(ctx.wanderTimer);
     if (ctx.followTimer) clearInterval(ctx.followTimer);
+    if (ctx.dragSafetyTimer) clearTimeout(ctx.dragSafetyTimer);
+    if (ctx.savePosTimer) clearTimeout(ctx.savePosTimer);
     ctx.globalShortcut.unregisterAll();
   });
 }

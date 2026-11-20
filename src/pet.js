@@ -95,15 +95,13 @@ let ignoring = null;
 let down = null;
 let longTimer = null;
 let moved = false;
-let clickStreak = 0;
-let clickStreakAt = 0;
-let lastClickAt = 0;
-let followClickAt = 0;       // 跟随点击专用防抖，独立于连点彩蛋
+let followClickAt = 0;       // 跟随点击专用防抖
 
 let bubbleTimer = null;
 let hoverTimer = null;
 let pomodoro = null;
 let pomodoroTimer = null;
+let pomodoroBlipTimer = null;
 let audioCtx = null;
 let lastDrawTime = 0;
 let systemIdleSeconds = 0;
@@ -235,18 +233,21 @@ function applySettings(next) {
   if (currentSkin !== null && nextSkin !== currentSkin) {
     loadSkin(nextSkin).catch((err) => console.warn('[pet] 换肤失败', err));
   }
-  // 状态只从存档读取一次，之后的设置变更不能覆盖运行中的心情/疲劳
+  // 状态只从存档读取一次，之后的设置变更不能覆盖运行中的心情/疲劳。
+  // next 的各顶层段做空值兜底：旧版存档/配置迁移时可能缺字段，避免解引用崩溃。
+  const st = next.state || {};
   if (!stateLoaded) {
     stateLoaded = true;
-    mood = clamp(Number(next.state.mood) || 0, 0, 100);
-    fatigue = clamp(Number(next.state.fatigue) || 0, 0, 100);
-    affection = Number(next.state.affection) || 0;
-    lastDaily = next.state.lastDaily || '';
+    mood = clamp(Number(st.mood) || 0, 0, 100);
+    fatigue = clamp(Number(st.fatigue) || 0, 0, 100);
+    affection = Number(st.affection) || 0;
+    lastDaily = st.lastDaily || '';
   }
   const rate = next.pet && Number(next.pet.actionRate);
   actionRate = rate > 0 ? rate : 1;
-  locked = !!next.window.locked;
-  forcePassthrough = !!next.window.passthrough;
+  const win = next.window || {};
+  locked = !!win.locked;
+  forcePassthrough = !!win.passthrough;
   roamEnabled = !next.system || next.system.roam !== false;
   if (!roamEnabled || locked) stopWalk(false);
   updateIgnore();
@@ -369,7 +370,13 @@ document.addEventListener('pointermove', (event) => {
     event.screenY - (down.sy == null ? down.y : down.sy)
   );
   if (moveDist > 8) {
-    if (locked) return;
+    if (locked) {
+      // 锁定时虽不拖动，但必须标记为已移动并取消长按计时，
+      // 否则长按回调仍会触发 happy 动作和气泡（点击彩蛋已被 locked 屏蔽，长按漏了）。
+      moved = true;
+      clearTimeout(longTimer);
+      return;
+    }
     moved = true;
     clearTimeout(longTimer);
     if (following) api.followStop();   // 请主进程停止跟随，状态由它回推
@@ -476,7 +483,6 @@ function handleClick() {
   // 不再本地改 following（本地改再反向通知会与主控台按钮/托盘形成双状态源冲突）。
   if (now - followClickAt < 320) return;
   followClickAt = now;
-  lastClickAt = now;
   lastInteraction = now;
   touchAffection();
 
@@ -571,8 +577,22 @@ function persistState() {
 
 /* ---------------- 系统联动 ---------------- */
 
+/** 从存档重新读取心情/疲劳/好感等状态（供 state:reload 命令调用） */
+async function reloadState() {
+  try {
+    const next = await api.getSettings();
+    stateLoaded = false;
+    applySettings(next);
+  } catch (err) {
+    console.warn('[pet] 状态重载失败', err);
+  }
+}
+
 function react(key, exprName, text, cooldownMs) {
   if (dragging || following) return false;
+  // 番茄钟的 read override 覆盖整个专注时段，系统事件（CPU/电量/久坐）的短时
+  // override 不能打断它，否则专注画面会突然变成 hot/sleep 再回退，前后矛盾。
+  if (pomodoro || (overrideExpr && overrideExpr.until > Date.now())) return false;
   const now = Date.now();
   if (reactionCooldown[key] && now - reactionCooldown[key] < cooldownMs) return false;
   reactionCooldown[key] = now;
@@ -608,7 +628,7 @@ function handleCommand(cmd) {
   if (!cmd) return;
   if (cmd.type === 'pomodoro:start') startPomodoro();
   else if (cmd.type === 'pomodoro:stop') stopPomodoro(false);
-  else if (cmd.type === 'state:reload') stateLoaded = false;
+  else if (cmd.type === 'state:reload') reloadState();
   else if (cmd.type === 'skin:reload') loadSkin(currentSkin).catch((err) => console.warn('[pet] 皮肤重载失败', err));
   else if (cmd.type === 'say') bubble(cmd.text, 3000);
   else if (cmd.type === 'follow:toggle') api.followToggle();
@@ -620,6 +640,9 @@ function startPomodoro() {
     return;
   }
   stopWalk(false);
+  // resolveExpr 中 following 优先级高于 override，跟随时启动番茄钟会导致 read 动作
+  // 永远不显示。开始专注前先停止跟随，状态由主进程 follow:ended 回推。
+  if (following && api.followStop) api.followStop();
   facing = 1;
   const focusMin = Math.max(1, Number(settings.pomodoro.focus) || 25);
   pomodoro = { phase: 'focus', endAt: Date.now() + focusMin * 60000 };
@@ -636,6 +659,8 @@ function stopPomodoro(finished) {
     clearInterval(pomodoroTimer);
     pomodoroTimer = null;
   }
+  clearTimeout(pomodoroBlipTimer);
+  pomodoroBlipTimer = null;
   pomodoro = null;
   overrideExpr = null;
   renderPomodoroTimer();
@@ -661,7 +686,8 @@ function pomodoroTick() {
     bubble(say('pomodoro', '专注结束，休息一下！'), 4200);
     setOverride('happy', 4000);
     blip(880, 0.12);
-    setTimeout(() => blip(1180, 0.12), 160);
+    clearTimeout(pomodoroBlipTimer);
+    pomodoroBlipTimer = setTimeout(() => blip(1180, 0.12), 160);
   } else {
     stopPomodoro(true);
     bubble('休息结束，继续加油！', 3000);
@@ -690,7 +716,11 @@ function hideBubble() {
 
 function say(action, fallback) {
   const pool = persona[action];
-  if (pool && pool.length) return pool[Math.floor(Math.random() * pool.length)];
+  // 台词池必须是字符串数组：persona.txt 若把某段误配成字符串，
+  // pool.length 会非零但 pool[i] 是单个字符，冒出乱码。
+  if (Array.isArray(pool) && pool.length) {
+    return pool[Math.floor(Math.random() * pool.length)];
+  }
   return fallback || '';
 }
 
@@ -736,8 +766,10 @@ function pickIdle() {
 function fpsOf(expr) {
   const act = actionConfig[resolveAction(expr)];
   let fps = ((act && act.fps) || 2) * actionRate;
-  // 跟随时跑动帧率随位移速度缩放：追得急时迈步快，接近时放慢，和位移节奏一致
-  if (following && followMoving && resolveAction(expr) === 'run') {
+  // 跟随时跑动帧率随位移速度缩放：追得急时迈步快，接近时放慢，和位移节奏一致。
+  // 用原始状态名 expr 判断而非 resolveAction 结果：皮肤在 triggers 里把 run 重映射成
+  // 自定义动作（如 dash）时，跟随加速依然生效。
+  if (following && followMoving && expr === 'run') {
     fps *= 0.7 + followSpeed * 0.6;   // 0.7x ~ 1.3x
   }
   return fps;
@@ -765,8 +797,7 @@ function draw(expr, t) {
   // 动作切换时从第一帧重新播放，也让 loop:false 的独有动作有明确的起点
   if (expr !== lastExpr) {
     lastExpr = expr;
-    exprSince = t;
-    lastDrawTime = 0;
+    exprSince = t;   // 帧进度从 exprSince 重新计算即可，无需动 lastDrawTime
   }
 
   const list = availableFrames(expr);
@@ -797,13 +828,17 @@ function draw(expr, t) {
   ctx.restore();
   lastDraw = { name, dx, dy, w: frame.img.width, h: frame.img.height, mirror };
 
-  drawExtras(expr, frame, dx, dy, t);
+  drawExtras(expr, frame, dx, dy, t, mirror);
 }
 
-function drawExtras(expr, frame, dx, dy, t) {
+function drawExtras(expr, frame, dx, dy, t, mirror) {
   const bbox = frame.bbox;
   if (!bbox || !bbox.w) return;
   const fx = (skinPack && skinPack.effects) || {};
+  // 符号跟随角色朝向：镜像时角色脸朝左，符号应画在左侧而不是背后。
+  // bbox 是未镜像的局部坐标，镜像后的右边缘对应画布上的 CW-(dx+bbox.x+bbox.w)。
+  const edgeX = mirror ? CW - (dx + bbox.x + bbox.w) : dx + bbox.x + bbox.w;
+  const dir = mirror ? -1 : 1;
 
   // 只有皮肤为该状态提供了专属动作帧时才叠加符号。
   // 若该状态回退成 idle（皮肤没配 sleep / hot / angry 动作），画面并不是这个动作，
@@ -811,18 +846,18 @@ function drawExtras(expr, frame, dx, dy, t) {
   const hasOwnAction = resolveAction(expr) !== 'idle';
 
   if (hasOwnAction && expr === 'sleep') {
-    const x = dx + bbox.x + bbox.w - 6;
+    const x = edgeX - 6 * dir;
     const y = dy + bbox.y + 8;
     ctx.fillStyle = fx.sleepZ || '#a9c2d6';
     ctx.font = 'bold 9px "Microsoft YaHei", sans-serif';
-    ctx.textAlign = 'left';
+    ctx.textAlign = mirror ? 'right' : 'left';
     ctx.fillText('z', x, y);
     ctx.font = 'bold 12px "Microsoft YaHei", sans-serif';
-    ctx.fillText('z', x + 5, y - 7);
+    ctx.fillText('z', x + 5 * dir, y - 7);
   }
 
   if (hasOwnAction && expr === 'hot') {
-    const x = dx + bbox.x + bbox.w - 5;
+    const x = edgeX - 5 * dir;
     const y = dy + bbox.y + 6;
     ctx.fillStyle = fx.hotDrop || '#93d9f5';
     ctx.fillRect(x, y + 2, 3, 5);
@@ -830,11 +865,11 @@ function drawExtras(expr, frame, dx, dy, t) {
   }
 
   if (hasOwnAction && expr === 'angry') {
-    const x = dx + bbox.x + bbox.w + 1;
+    const x = edgeX + 1 * dir;
     const y = dy + bbox.y + 4 + (Math.floor(t * 6) % 2);
     ctx.fillStyle = fx.angryMark || '#e2685f';
     ctx.fillRect(x, y, 2, 2);
-    ctx.fillRect(x + 3, y + 2, 2, 2);
+    ctx.fillRect(x + 3 * dir, y + 2, 2, 2);
   }
 }
 
