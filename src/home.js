@@ -11,6 +11,99 @@ let clockTimer = null;          // 时钟定时器句柄
 let liveStateTimer = null;      // 状态拉取定时器句柄
 let previewRaf = 0;             // 预览动画帧句柄
 
+/* ---------------- 状态趋势采样 ---------------- */
+// 每次状态拉取记一个点，存 localStorage 让关掉主页再打开也能看到趋势。
+// 24 点 × 5 秒 = 最近 2 分钟。
+const TREND_KEY = 'pixelpet.stateTrend.v1';
+const TREND_MAX = 24;
+let stateTrend = { mood: [], fatigue: [] };
+
+function loadStateTrend() {
+  try {
+    const raw = localStorage.getItem(TREND_KEY);
+    if (!raw) return;
+    const d = JSON.parse(raw);
+    if (d && Array.isArray(d.mood) && Array.isArray(d.fatigue)) {
+      // 超过 30 分钟的旧数据没有参考意义，丢弃
+      if (!d.at || Date.now() - d.at < 30 * 60 * 1000) {
+        stateTrend = {
+          mood: d.mood.slice(-TREND_MAX).map(Number).filter(Number.isFinite),
+          fatigue: d.fatigue.slice(-TREND_MAX).map(Number).filter(Number.isFinite)
+        };
+      }
+    }
+  } catch (err) { /* 存储不可用则用空历史 */ }
+}
+
+function pushStateTrend(mood, fatigue) {
+  const now = Date.now();
+  // 采样间隔过短就只更新最后一个点，避免换肤/设置变更时刷入重复点
+  if (pushStateTrend.lastAt && now - pushStateTrend.lastAt < 3000) {
+    if (stateTrend.mood.length) {
+      stateTrend.mood[stateTrend.mood.length - 1] = mood;
+      stateTrend.fatigue[stateTrend.fatigue.length - 1] = fatigue;
+    }
+    drawStateTrend();
+    return;
+  }
+  pushStateTrend.lastAt = now;
+  stateTrend.mood.push(mood);
+  stateTrend.fatigue.push(fatigue);
+  if (stateTrend.mood.length > TREND_MAX) stateTrend.mood.shift();
+  if (stateTrend.fatigue.length > TREND_MAX) stateTrend.fatigue.shift();
+  try {
+    localStorage.setItem(TREND_KEY, JSON.stringify({ mood: stateTrend.mood, fatigue: stateTrend.fatigue, at: now }));
+  } catch (err) { /* 存储不可用时仅保留内存历史 */ }
+  drawStateTrend();
+}
+
+function drawStateTrend() {
+  const cv = $('stateTrend');
+  if (!cv) return;
+  const dpr = window.devicePixelRatio || 1;
+  const w = cv.clientWidth || 220;
+  const h = 44;
+  const pw = Math.round(w * dpr);
+  const ph = Math.round(h * dpr);
+  if (cv.width !== pw || cv.height !== ph) { cv.width = pw; cv.height = ph; }
+  const c = cv.getContext('2d');
+  c.setTransform(dpr, 0, 0, dpr, 0, 0);
+  c.clearRect(0, 0, w, h);
+
+  // 淡色参考线：25% / 50% / 75%
+  c.strokeStyle = 'rgba(150,125,100,.12)';
+  c.lineWidth = 1;
+  [0.25, 0.5, 0.75].forEach((p) => {
+    const y = Math.round(h - p * h) + 0.5;
+    c.beginPath(); c.moveTo(0, y); c.lineTo(w, y); c.stroke();
+  });
+
+  const drawLine = (arr, color) => {
+    if (arr.length < 2) return;
+    const step = (w - 4) / (TREND_MAX - 1);
+    const startX = w - 2 - (arr.length - 1) * step;   // 右对齐，最新点贴右边
+    c.strokeStyle = color;
+    c.lineWidth = 1.6;
+    c.lineJoin = 'round';
+    c.beginPath();
+    arr.forEach((v, i) => {
+      const x = startX + i * step;
+      const y = h - 2 - (Math.max(0, Math.min(100, v)) / 100) * (h - 4);
+      if (i === 0) c.moveTo(x, y); else c.lineTo(x, y);
+    });
+    c.stroke();
+    // 末端小圆点突出当前值
+    const last = arr[arr.length - 1];
+    c.fillStyle = color;
+    c.beginPath();
+    c.arc(w - 2, h - 2 - (Math.max(0, Math.min(100, last)) / 100) * (h - 4), 2, 0, Math.PI * 2);
+    c.fill();
+  };
+  const css = getComputedStyle(document.documentElement);
+  drawLine(stateTrend.mood, css.getPropertyValue('--mood').trim() || '#e8a06b');
+  drawLine(stateTrend.fatigue, css.getPropertyValue('--fatigue').trim() || '#8fb4cf');
+}
+
 /* ---------------- Tab 切换 ---------------- */
 function initTabs() {
   document.querySelectorAll('.tab').forEach((tab) => {
@@ -103,6 +196,7 @@ function renderPetInfo() {
   $('valFatigue').textContent = Math.round(fatigue);
   $('barAffection').style.width = Math.min(100, affection) + '%';
   $('valAffection').textContent = Math.round(affection);
+  pushStateTrend(mood, fatigue);
 
   $('statAffection').textContent = Math.round(affection);
   const activeSkin = skins.find((s) => s.id === (settings.pet && settings.pet.skin));
@@ -459,6 +553,7 @@ async function init() {
   settings = await api.getSettings();
   skins = (await api.listSkins()) || [];
 
+  loadStateTrend();
   initTabs();
   bindSettings();
   bindButtons();

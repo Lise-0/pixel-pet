@@ -254,6 +254,16 @@ body {
 .bar i.affection { background: linear-gradient(90deg, #ee93a2, #d9627a); }
 .bar-row b { width: 26px; text-align: right; font-size: 11px; color: var(--text-2); font-variant-numeric: tabular-nums; }
 
+/* 状态趋势迷你图 */
+.state-trend { margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--line); }
+.trend-head { display: flex; align-items: baseline; justify-content: space-between; font-size: 11px; color: var(--text-2); }
+.trend-head small { font-size: 9px; color: var(--text-3); }
+#stateTrend { display: block; width: 100%; height: 44px; margin-top: 6px; }
+.trend-legend { display: flex; gap: 16px; margin-top: 4px; font-size: 10px; color: var(--text-3); }
+.trend-legend i { display: inline-block; width: 10px; height: 3px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }
+.trend-legend .lg-mood { background: var(--mood); }
+.trend-legend .lg-fatigue { background: var(--fatigue); }
+
 .preview-actions { width: 100%; flex: none; margin-top: auto; display: flex; gap: 8px; }
 .preview-actions .btn { flex: 1; }
 
