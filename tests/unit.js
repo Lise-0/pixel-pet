@@ -263,6 +263,23 @@ test('inspect 只读取 skin.json/persona.txt，忽略任意文本配置文件',
   }
 });
 
+test('inspect 支持 manifest.persona 指定的自定义台词文件名', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pixelpet-persona-'));
+  try {
+    fs.writeFileSync(path.join(dir, 'skin.json'), JSON.stringify({ name: '自定义台词', persona: 'dialog.txt' }));
+    fs.writeFileSync(path.join(dir, 'dialog.txt'), '[idle]\n你好呀\n');
+    fs.writeFileSync(path.join(dir, 'secrets.txt'), 'TOP_SECRET_SHOULD_NOT_LEAK');
+    const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
+    fs.writeFileSync(path.join(dir, 'idle-1.png'), png);
+    const info = skinImport.inspect([dir]);
+    assert.equal(info.personaText, '[idle]\n你好呀\n', '应读取 manifest 指定的 dialog.txt');
+    assert.ok(!JSON.stringify(info).includes('TOP_SECRET_SHOULD_NOT_LEAK'),
+      '未声明的 secrets.txt 仍不得外泄');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('listSkins 每款皮肤只读单张缩略图而非全部帧', () => {
   const skins = config.listSkins();
   assert.ok(skins.length >= 2, '应至少能列出内置皮肤');
@@ -294,6 +311,35 @@ test('listSkins 与 readSkin 缩略图一致', () => {
   const pack = config.readSkin('default');
   assert.ok(meta && pack);
   assert.equal(meta.thumb, pack.thumb, '同一皮肤的清单缩略图应与完整包一致');
+});
+
+test('无 thumb/idle-1.png 时清单与完整包仍选中同一张兜底帧', () => {
+  // 构造一个既无 manifest.thumb 也无 idle-1.png 的皮肤：
+  // 两个入口的兜底都必须取“按文件名排序的第一张 PNG”，否则缩略图会不一致。
+  const ctx = require('../lib/context');
+  const oldDataDir = ctx.DATA_DIR;
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pixelpet-thumb-'));
+  const userRoot = path.join(tmp, 'skins');
+  const skinDir = path.join(userRoot, 'fallback-test');
+  try {
+    fs.mkdirSync(skinDir, { recursive: true });
+    fs.writeFileSync(path.join(skinDir, 'skin.json'), JSON.stringify({ name: '兜底测试', frames: {} }));
+    const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
+    // 故意按 b → a 的倒序创建两张不同内容的 PNG，验证兜底取的是“排序第一张 a”
+    fs.writeFileSync(path.join(skinDir, 'b-1.png'), png);
+    fs.writeFileSync(path.join(skinDir, 'a-1.png'), Buffer.concat([png, Buffer.from('AAAA')]));
+    ctx.DATA_DIR = tmp;
+    const meta = config.listSkins().find((s) => s.id === 'fallback-test');
+    const pack = config.readSkin('fallback-test');
+    assert.ok(meta && pack, '临时皮肤应被扫描到');
+    assert.equal(meta.thumb, pack.thumb, '兜底缩略图两入口应一致（均取排序第一张）');
+    assert.ok(meta.thumb.startsWith('data:image/png;base64,'), '兜底缩略图应是有效 PNG');
+    assert.equal(meta.frameCount, pack.frameCount, '两入口 frameCount 口径应一致');
+  } finally {
+    ctx.DATA_DIR = oldDataDir;
+    config.invalidate();
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
 });
 
 console.log(`\n[单测结果] 通过 ${passed}，失败 ${failed}`);

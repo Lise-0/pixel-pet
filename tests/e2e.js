@@ -101,9 +101,10 @@ class CDP {
   });
 
   console.log('\n[E2E] 桌宠层');
-  await check('睡觉符号守卫无回归（缺动作回退 idle）', async () => {
-    // 不依赖任何本机导入的皮肤 ID：临时移除 sleep 动作映射，验证 resolveAction('sleep')
-    // 会回退到 idle（drawExtras 据此用 hasOwnAction 守卫，不给无睡觉动作的皮肤画 z z），
+  await check('睡觉符号守卫无回归（缺动作不画 z z）', async () => {
+    // 不依赖任何本机导入的皮肤 ID：临时移除 sleep 动作映射，验证
+    // (1) resolveAction('sleep') 回退到 idle；
+    // (2) drawExtras 用 hasOwnAction 守卫，缺动作时不调用 fillText('z')。
     // 测试结束原样恢复，绝不改动真实皮肤包。
     const r = await pet.ev(`(function(){
       const t = skinPack && skinPack.triggers;
@@ -111,13 +112,27 @@ class CDP {
       const savedTrig = hadTrig ? t.sleep : undefined;
       const hadAct = Object.prototype.hasOwnProperty.call(actionConfig, 'sleep');
       const savedAct = actionConfig.sleep;
-      // 同时移除 triggers 映射和动作本身，模拟“皮肤没有专属睡觉动作”
       if (t) delete t.sleep;
       delete actionConfig.sleep;
       const fallback = resolveAction('sleep') === 'idle';
+
+      // 真正验证绘制守卫：hook fillText，捕获 sleep 分支是否画了 'z'
+      const fake = { bbox: { x: 0, y: 0, w: 40, h: 40 }, img: { width: 40, height: 40 } };
+      const texts = [];
+      const orig = ctx.fillText;
+      let guardOk = false;
+      try {
+        ctx.fillText = function(s){ texts.push(String(s)); };
+        drawExtras('sleep', fake, 0, 0, 0, false);
+        guardOk = texts.indexOf('z') === -1;
+      } catch (err) {
+        guardOk = false;
+      } finally {
+        ctx.fillText = orig;
+      }
       if (hadTrig) t.sleep = savedTrig;
       if (hadAct) actionConfig.sleep = savedAct;
-      return fallback ? 'ok' : 'fail';
+      return (fallback && guardOk) ? 'ok' : 'fail';
     })()`);
     assert(r === 'ok', r);
   });

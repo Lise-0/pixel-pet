@@ -230,6 +230,12 @@ async function init() {
   window.addEventListener('beforeunload', () => {
     stateTimers.forEach(clearInterval);
     stateTimers = [];
+    // 其余一次性/循环句柄也一并清理，避免热重载或嵌入场景下空转。
+    // clearTimeout 与 clearInterval 在浏览器中共用同一 ID 池，可交叉清除。
+    [bubbleTimer, hoverTimer, pomodoroTimer, pomodoroBlipTimer].forEach((t) => {
+      if (t) { clearTimeout(t); clearInterval(t); }
+    });
+    bubbleTimer = hoverTimer = pomodoroTimer = pomodoroBlipTimer = null;
     persistStateOnUnload();
   });
 }
