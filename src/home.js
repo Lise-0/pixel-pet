@@ -7,6 +7,9 @@ let settings = null;
 let skins = [];
 let pomodoroRunning = false;
 let syncing = false;
+let clockTimer = null;          // 时钟定时器句柄
+let liveStateTimer = null;      // 状态拉取定时器句柄
+let previewRaf = 0;             // 预览动画帧句柄
 
 /* ---------------- Tab 切换 ---------------- */
 function initTabs() {
@@ -81,7 +84,7 @@ function drawPreview(seconds) {
 }
 
 function previewLoop(now) {
-  requestAnimationFrame(previewLoop);
+  previewRaf = requestAnimationFrame(previewLoop);
   if (document.hidden || !preview.frames.length) return;
   drawPreview(now / 1000);
 }
@@ -131,8 +134,10 @@ function renderPetInfo() {
 // 桌宠的 saveState 只静默写盘、不广播 settings:changed，
 // 所以主页自己定时拉取，心情/疲劳/好感才不会停在打开主页那一刻。
 // 只合并 state 字段，不碰 pet/window/system 等，避免覆盖用户正在编辑的设置。
+let liveStateInFlight = false;
 async function refreshLiveState() {
-  if (document.hidden || !settings) return;
+  if (document.hidden || !settings || liveStateInFlight) return;
+  liveStateInFlight = true;
   try {
     const latest = await api.getSettings();
     if (latest && latest.state) {
@@ -140,6 +145,9 @@ async function refreshLiveState() {
       renderPetInfo();
     }
   } catch (err) { /* 拉取失败时保留当前显示 */ }
+  finally {
+    liveStateInFlight = false;
+  }
 }
 
 /* ---------------- 皮肤网格 ---------------- */
@@ -458,14 +466,21 @@ async function init() {
   renderPetInfo();
   renderSkins();
   updateClock();
-  setInterval(updateClock, 30000);
+  clockTimer = setInterval(updateClock, 30000);
   // 桌宠状态是静默存档的，主页定时拉取以保持三条状态条实时更新
   refreshLiveState();
-  setInterval(refreshLiveState, 5000);
+  liveStateTimer = setInterval(refreshLiveState, 5000);
   updateQuickButtons();
 
   await buildPreview(settings.pet && settings.pet.skin);
-  requestAnimationFrame(previewLoop);
+  previewRaf = requestAnimationFrame(previewLoop);
+
+  // 页面销毁时停掉定时器和动画帧，便于热重载/嵌入场景回收
+  window.addEventListener('beforeunload', () => {
+    clearInterval(clockTimer);
+    clearInterval(liveStateTimer);
+    cancelAnimationFrame(previewRaf);
+  });
 
   try {
     $('dataPath').textContent = await api.dataPath();

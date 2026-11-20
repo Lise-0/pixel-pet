@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld('pet', {
   getSettings: () => ipcRenderer.invoke('settings:get'),
   patchSettings: (patch) => ipcRenderer.invoke('settings:patch', patch),
   saveState: (state) => ipcRenderer.invoke('state:save', state),
+  saveStateSync: (state) => ipcRenderer.send('state:save-sync', state),
   readSkin: (skin) => ipcRenderer.invoke('config:skin', skin),
   listSkins: () => ipcRenderer.invoke('config:skins'),
   dataPath: () => ipcRenderer.invoke('app:data-path'),

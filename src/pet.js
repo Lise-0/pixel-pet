@@ -222,7 +222,7 @@ async function init() {
   if (api.onFollowMotion) api.onFollowMotion(onFollowMotion);
   api.onWanderEnded((info) => stopWalk(!!(info && info.edge)));
 
-  window.addEventListener('beforeunload', persistState);
+  window.addEventListener('beforeunload', persistStateOnUnload);
 }
 
 function applySettings(next) {
@@ -564,15 +564,25 @@ function persistStateSoon() {
   persistStateSoon.timer = setTimeout(persistState, 1200);
 }
 
-function persistState() {
-  if (!settings) return;
-  api.saveState({
+function currentStateSnapshot() {
+  return {
     mood: Math.round(mood * 10) / 10,
     fatigue: Math.round(fatigue * 10) / 10,
     affection,
     lastDaily,
     lastInteract: lastInteraction
-  });
+  };
+}
+
+function persistState() {
+  if (!settings) return;
+  api.saveState(currentStateSnapshot());
+}
+
+/** 页面卸载时用同步通知落盘，避免 invoke 来不及返回导致最后状态丢失 */
+function persistStateOnUnload() {
+  if (!settings || !api.saveStateSync) return;
+  api.saveStateSync(currentStateSnapshot());
 }
 
 /* ---------------- 系统联动 ---------------- */
@@ -756,11 +766,31 @@ function resolveAction(expr) {
   return 'idle';
 }
 
-/** 待机动作池：皮肤可让 idle / 打哈欠 / 伸懒腰 等动作轮流出现 */
-function pickIdle() {
+/** 待机动作池：皮肤可让 idle / 打哈欠 / 伸懒腰 等动作轮流出现。
+ *  每个待机动作固定展示 4.5 秒后切下一个，用本地计时而非墙上时钟：
+ *  从别的动作切回待机时总是从 idle 池第一个动作开始，避免起点漂移导致
+ *  偶尔连续出现同一个待机动作。 */
+let idlePoolIndex = 0;
+let idlePoolChangedAt = 0;
+function idlePool() {
   const pool = skinPack && skinPack.triggers && skinPack.triggers.idlePool;
-  if (!Array.isArray(pool) || pool.length < 2) return 'idle';
-  return pool[Math.floor(Date.now() / 4500) % pool.length] || 'idle';
+  return Array.isArray(pool) ? pool : null;
+}
+function pickIdle() {
+  const pool = idlePool();
+  if (!pool || pool.length < 2) return 'idle';
+  const now = Date.now();
+  if (!idlePoolChangedAt) idlePoolChangedAt = now;
+  if (now - idlePoolChangedAt >= 4500) {
+    idlePoolIndex = (idlePoolIndex + 1) % pool.length;
+    idlePoolChangedAt = now;
+  }
+  return pool[idlePoolIndex] || 'idle';
+}
+/** 重置待机池轮换（离开待机表现时调用，下次回来从第一个动作开始） */
+function resetIdlePool() {
+  idlePoolIndex = 0;
+  idlePoolChangedAt = 0;
 }
 
 function fpsOf(expr) {
@@ -777,14 +807,22 @@ function fpsOf(expr) {
 
 function resolveExpr() {
   const now = Date.now();
+  let expr;
   // 跟随时优先表现：移动中切小跑，停下切待机，不被长期 override 卡住
-  if (following) return followMoving ? 'run' : 'idle';
-  if (overrideExpr && now < overrideExpr.until) return overrideExpr.name;
-  if (overrideExpr) overrideExpr = null;
-  if (dragging) return 'drag';
-  if (fatigue > behavior.moodSleepyThreshold) return 'sleep';
-  if (awayMs() > behavior.idleSleepAfter * 1000) return 'sleep';
-  return pickIdle();
+  if (following) expr = followMoving ? 'run' : 'idle';
+  else if (overrideExpr && now < overrideExpr.until) expr = overrideExpr.name;
+  else {
+    if (overrideExpr) overrideExpr = null;
+    if (dragging) expr = 'drag';
+    else if (fatigue > behavior.moodSleepyThreshold) expr = 'sleep';
+    else if (awayMs() > behavior.idleSleepAfter * 1000) expr = 'sleep';
+    else expr = pickIdle();
+  }
+  // 离开待机池动作（进入 run/sleep/drag/override 等）时重置轮换，
+  // 下次回到待机从第一个动作开始，避免起点漂移导致连续重复同一待机动作。
+  const pool = idlePool();
+  if (!pool || pool.indexOf(expr) < 0) resetIdlePool();
+  return expr;
 }
 
 function availableFrames(expr) {
@@ -813,10 +851,12 @@ function draw(expr, t) {
   const mirror = !!act.mirror && facing < 0;
   const dx = Math.round((CW - frame.img.width) / 2);
   // 颠簸幅度由皮肤动作配置决定，配合横向位移呈现"跑起来"的感觉。
-  // 用帧数取模（而非固定 4），任意帧数的 run 都有完整起伏节奏。
+  // 按帧数在起伏序列上取模：任意帧数的 run 都能铺满完整节奏，
+  // 2 帧时只用前两档、3 帧用前三档，不会出现跳变的突兀感。
   const bobMax = Number(act.bob) || 0;
   const bobPattern = [0, 0.7, 0.35, 1];
-  const bob = bobMax ? Math.round(bobMax * bobPattern[frameIndex % bobPattern.length]) : 0;
+  const bobSlots = Math.min(list.length, bobPattern.length);
+  const bob = bobMax ? Math.round(bobMax * bobPattern[frameIndex % bobSlots]) : 0;
   const dy = Math.round(GROUND_Y - frame.img.height) - bob;
 
   ctx.save();
