@@ -23,23 +23,35 @@ function loadStateTrend() {
     const raw = localStorage.getItem(TREND_KEY);
     if (!raw) return;
     const d = JSON.parse(raw);
-    if (d && Array.isArray(d.mood) && Array.isArray(d.fatigue)) {
-      // 超过 30 分钟的旧数据没有参考意义，丢弃
-      if (!d.at || Date.now() - d.at < 30 * 60 * 1000) {
-        stateTrend = {
-          mood: d.mood.slice(-TREND_MAX).map(Number).filter(Number.isFinite),
-          fatigue: d.fatigue.slice(-TREND_MAX).map(Number).filter(Number.isFinite)
-        };
-      }
+    // 没有/非法的采样时间就不能判断新鲜度，宁可丢掉也不载入任意久远的历史。
+    // 失效时连内存里的旧曲线一起清掉，避免调用方重复加载时看到半成品。
+    if (!d || !Number.isFinite(d.at) || Date.now() - d.at >= 30 * 60 * 1000 ||
+        !Array.isArray(d.mood) || !Array.isArray(d.fatigue)) {
+      stateTrend = { mood: [], fatigue: [] };
+      return;
     }
-  } catch (err) { /* 存储不可用则用空历史 */ }
+    // 两条曲线必须按同一批采样点成对还原：分别 filter 会丢掉不同索引，
+    // 让心情与疲劳的数据点永久错位。
+    const n = Math.min(d.mood.length, d.fatigue.length);
+    const mood = [];
+    const fatigue = [];
+    for (let i = Math.max(0, n - TREND_MAX); i < n; i++) {
+      const m = Number(d.mood[i]);
+      const f = Number(d.fatigue[i]);
+      if (Number.isFinite(m) && Number.isFinite(f)) { mood.push(m); fatigue.push(f); }
+    }
+    stateTrend = { mood, fatigue };
+  } catch (err) {
+    stateTrend = { mood: [], fatigue: [] };   // 存储不可用/内容损坏则用空历史
+  }
 }
 
 function pushStateTrend(mood, fatigue) {
+  if (!Number.isFinite(mood) || !Number.isFinite(fatigue)) return;
   const now = Date.now();
   // 采样间隔过短就只更新最后一个点，避免换肤/设置变更时刷入重复点
   if (pushStateTrend.lastAt && now - pushStateTrend.lastAt < 3000) {
-    if (stateTrend.mood.length) {
+    if (stateTrend.mood.length && stateTrend.fatigue.length) {
       stateTrend.mood[stateTrend.mood.length - 1] = mood;
       stateTrend.fatigue[stateTrend.fatigue.length - 1] = fatigue;
     }

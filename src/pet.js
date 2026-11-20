@@ -272,7 +272,9 @@ function applySettings(next) {
 
 function maybeRoam() {
   if (!api || !settings || !roamEnabled || document.hidden) return;
-  if (locked || dragging || down || pomodoro || hit) return;
+  // 跟随期间窗口由主进程的 followTimer 独占；这里再发起散步会两个定时器同时
+  // setPosition（猫抖动），而且新的“保持距离”跟随不再让光标贴住猫身，hit 挡不住了。
+  if (locked || dragging || down || pomodoro || hit || following) return;
   if (overrideExpr || roamTimer) return;
   if (Date.now() - lastInteraction < 8000) return;
   if (Math.random() > 0.45) return;
@@ -280,7 +282,7 @@ function maybeRoam() {
 }
 
 function startWalk() {
-  if (roamTimer) return;
+  if (roamTimer || following || locked || !roamEnabled) return;
   facing = Math.random() < 0.5 ? -1 : 1;
   const duration = 1600 + Math.random() * 2400;
   lastInteraction = Date.now();

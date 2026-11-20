@@ -16,7 +16,7 @@
 
 ## 运行
 
-需要 Node.js 18+（含 npm）。
+运行应用需要 Node.js 18+（含 npm）；端到端测试用到了全局 `WebSocket`，需 Node.js 22+ 才能直接跑 `npm test`。
 
 ```bash
 npm install
@@ -39,10 +39,17 @@ npm run test:unit    # 仅单元测试（纯 Node，无需 Electron）
 npm run test:e2e     # 仅端到端测试
 ```
 
-端到端测试通过 Chrome DevTools Protocol 连接正在运行的应用（调试端口 `9223`）。运行前请先启动应用并开启该端口：
+端到端测试通过 Chrome DevTools Protocol 连接正在运行的应用（默认调试端口 `9223`）。运行前请先启动应用并开启该端口：
 
 ```bash
 electron . --remote-debugging-port=9223
+```
+
+换端口时把端口传给测试入口即可（应用与测试必须用同一个端口）：
+
+```bash
+PIXELPET_CDP_PORT=9333 npm test      # 或 node tests/run.js 9333
+npm run test:e2e -- 9333
 ```
 
 ## 皮肤格式

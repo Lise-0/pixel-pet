@@ -180,6 +180,34 @@ class CDP {
     const r = await home.ev(`/^\\d+$/.test(document.getElementById('valAffection').textContent) ? 'ok' : 'fail'`);
     assert(r === 'ok', r);
   });
+  await check('状态趋势：无时间戳/过期数据丢弃，两条曲线成对还原', async () => {
+    const r = JSON.parse(await home.ev(`(function(){
+      const key = TREND_KEY;
+      const saved = localStorage.getItem(key);
+      const before = { mood: stateTrend.mood.slice(), fatigue: stateTrend.fatigue.slice() };
+      try {
+        localStorage.setItem(key, JSON.stringify({ mood:[10,20,30], fatigue:[40,50,60] }));
+        stateTrend = { mood:[99], fatigue:[99] };
+        loadStateTrend();
+        const noAt = stateTrend.mood.length === 0 && stateTrend.fatigue.length === 0;
+        localStorage.setItem(key, JSON.stringify({ mood:[10,20,'bad'], fatigue:[40,50,60,70], at: Date.now() }));
+        loadStateTrend();
+        const paired = stateTrend.mood.length === 2 && stateTrend.fatigue.length === 2 &&
+          stateTrend.mood[0] === 10 && stateTrend.fatigue[0] === 40 &&
+          stateTrend.mood[1] === 20 && stateTrend.fatigue[1] === 50;
+        localStorage.setItem(key, JSON.stringify({ mood:[1,2], fatigue:[3,4], at: Date.now()-31*60*1000 }));
+        stateTrend = { mood:[99], fatigue:[99] };
+        loadStateTrend();
+        const stale = stateTrend.mood.length === 0 && stateTrend.fatigue.length === 0;
+        return JSON.stringify({ noAt, paired, stale });
+      } finally {
+        if (saved === null) localStorage.removeItem(key); else localStorage.setItem(key, saved);
+        stateTrend = before;
+        drawStateTrend();
+      }
+    })()`));
+    assert(r.noAt && r.paired && r.stale, JSON.stringify(r));
+  });
 
   console.log('\n[E2E] 番茄钟统计');
   await check('统计 API 与 UI 元素就绪', async () => {

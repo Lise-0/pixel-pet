@@ -13,7 +13,7 @@ const stats = require('../lib/pomodoro-stats');
 const { readZip } = require('../lib/skin-import');
 const skinImport = require('../lib/skin-import');
 const config = require('../lib/config');
-const { followParams, followStep, DEFAULT_LOOSENESS, FOLLOW_TICK_MS } = require('../lib/follow-params');
+const { followParams, followStep, followHysteresis, DEFAULT_LOOSENESS, FOLLOW_TICK_MS } = require('../lib/follow-params');
 const fsMod = require('node:fs');
 
 let passed = 0;
@@ -403,6 +403,175 @@ test('设置校验：pet.followLoose 被夹在 0~100 且拒绝非数字', () => 
   assert.equal(sanitizePatch({ pet: { followLoose: 250 } }).pet.followLoose, 100);
   assert.equal(sanitizePatch({ pet: { followLoose: -3 } }).pet.followLoose, 0);
   assert.equal(sanitizePatch({ pet: { followLoose: 'x' } }).pet.followLoose, undefined);
+});
+
+/* ---------------- 本轮修复的回归 ---------------- */
+console.log('\n[单测] 跟随滞回与限速（主循环逻辑）');
+
+test('跟随滞回：不能移动时立即复位，不再卡在跑动态', () => {
+  const p = followParams(DEFAULT_LOOSENESS);
+  const far = followStep(p, 400, 0);
+  assert.equal(followHysteresis(p, far, false, false).running, false, '贴边时不应起身');
+  assert.equal(followHysteresis(p, far, true, false).running, false, '跑动中贴边应立即复位');
+  assert.equal(followHysteresis(p, far, true, false).moving, false);
+  assert.equal(followHysteresis(p, far, false, true).running, true, '超出起跑阈值且能移动才起身');
+  assert.equal(followHysteresis(p, far, false, true).moving, true);
+  const dead = followStep(p, p.keepDist + p.stopGap - 1, 0);
+  assert.equal(followHysteresis(p, dead, true, true).running, false, '进入停止死区应复位');
+  const wobble = followStep(p, p.keepDist + p.startGap - 1, 0);
+  assert.equal(followHysteresis(p, wobble, false, true).running, false, '死区内小晃动不应起身');
+});
+
+test('跟随滞回：完整收敛后状态归位，不会因 gap 略大于 stopGap 永远卡住', () => {
+  const p = followParams(DEFAULT_LOOSENESS);
+  const mouse = 800;
+  let pos = 0;
+  let running = false;
+  let idleTicks = 0;
+  for (let i = 0; i < 600; i++) {
+    const s = followStep(p, mouse - pos, 0);
+    // 与主循环一致：用「假设步长」判定 canMove，不足 1px 视为不能动
+    const canMove = s.step >= 1;
+    const h = followHysteresis(p, s, running, canMove);
+    running = h.running;
+    if (h.moving) pos += s.step; else idleTicks += 1;
+  }
+  assert.equal(running, false, '收敛后 running 必须复位（旧实现会永远为 true）');
+  assert.ok(idleTicks > 0, '应存在静止 tick');
+  assert.ok(mouse - pos >= p.keepDist * 0.95, '仍应停在保持距离之外');
+});
+
+test('跟随限速：单 tick 位移封顶，松紧档切换不会瞬移', () => {
+  const loose = followParams(100);
+  const def = followParams(DEFAULT_LOOSENESS);
+  const tight = followParams(0);
+  assert.ok(tight.maxStep > def.maxStep && def.maxStep > loose.maxStep, '越紧单 tick 上限越大');
+  assert.ok(followStep(loose, 3000, 0).step <= loose.maxStep + 1e-9);
+  const farTight = followStep(tight, 3000, 0);
+  assert.ok(farTight.step <= tight.maxStep + 1e-9);
+  assert.ok(farTight.step < 25, '最紧档单 tick 也不该飞过 25px');
+});
+
+console.log('\n[单测] 番茄钟统计口径');
+
+test('统计口径：休息完成不占专注明细配额', () => {
+  let list = [];
+  for (let i = 0; i < 10; i++) {
+    list = stats.record(list, { at: NOW + i * 1000, minutes: 25, phase: 'focus' });
+    list = stats.record(list, { at: NOW + i * 1000 + 500, minutes: 5, phase: 'break' });
+  }
+  assert.equal(list.length, 10);
+  assert.ok(list.every((e) => e.phase === 'focus'));
+});
+
+test('统计口径：累计值独立于 500 条明细上限，且兼容旧存档', () => {
+  const list = Array.from({ length: stats.MAX_RECORDS },
+    (_, i) => ({ at: NOW + i, minutes: 25, phase: 'focus' }));
+  const s = stats.summarize(list, NOW, 7, { focusMinutes: 99999, focusCount: 4000 });
+  assert.equal(s.totalMinutes, 99999, '明细被裁剪后累计分钟仍应增长');
+  assert.equal(s.totalCount, 4000, '明细被裁剪后累计番茄数仍应增长');
+  const old = stats.summarize(list, NOW, 7);   // 旧存档没有 lifetime，回退明细累加
+  assert.equal(old.totalMinutes, stats.MAX_RECORDS * 25);
+  assert.equal(old.totalCount, stats.MAX_RECORDS);
+  const bad = stats.summarize([], NOW, 7, { focusMinutes: NaN, focusCount: -5 });
+  assert.equal(bad.totalMinutes, 0);
+  assert.equal(bad.totalCount, 0);
+});
+
+test('统计口径：连续天数不受 7 天窗口限制，今天未专注时从昨天起算', () => {
+  const list = [];
+  for (let i = 1; i <= 10; i++) list.push({ at: at(i, 9), minutes: 25, phase: 'focus' });
+  assert.equal(stats.summarize(list, NOW, 7).streak, 10, '昨天往前连续 10 天');
+  const withToday = list.concat([{ at: at(0, 9), minutes: 25, phase: 'focus' }]);
+  assert.equal(stats.summarize(withToday, NOW, 7).streak, 11);
+  const broken = list.filter((e) => e.at !== at(3, 9));
+  assert.equal(stats.summarize(broken, NOW, 7).streak, 2, '断档后只数最近连续段');
+});
+
+test('存档：lifetime 累计字段通过白名单，旧存档自动补默认值', () => {
+  const clean = sanitizePatch({ pomodoro: { lifetime: { focusMinutes: 300, focusCount: 12, evil: 1 } } });
+  assert.equal(clean.pomodoro.lifetime.focusMinutes, 300);
+  assert.equal(clean.pomodoro.lifetime.focusCount, 12);
+  assert.equal('evil' in clean.pomodoro.lifetime, false);
+  assert.deepEqual(DEFAULT_SETTINGS.pomodoro.lifetime, { focusMinutes: 0, focusCount: 0 });
+  const file = path.join(os.tmpdir(), `pixelpet-lifetime-${Date.now()}.json`);
+  fs.writeFileSync(file, JSON.stringify({ pomodoro: { notify: true } }));
+  try {
+    const s = new Store(file);
+    s.load();   // 旧存档没有 lifetime，白名单合并后应补出默认累计值
+    assert.deepEqual(s.data.pomodoro.lifetime, { focusMinutes: 0, focusCount: 0 });
+  } finally {
+    fs.rmSync(file, { force: true });
+  }
+});
+
+test('存档：旧格式（有明细无 lifetime）升级时折算累计基线', () => {
+  const file = path.join(os.tmpdir(), `pixelpet-migrate-${Date.now()}.json`);
+  const oldStats = [
+    { at: NOW, minutes: 25, phase: 'focus' },
+    { at: NOW + 1, minutes: 5, phase: 'break' },
+    { at: NOW + 2, minutes: 30, phase: 'focus' },
+    { at: NOW + 3, minutes: -9, phase: 'focus' }
+  ];
+  try {
+    fs.writeFileSync(file, JSON.stringify({ pomodoro: { notify: true, stats: oldStats } }));
+    const s = new Store(file);
+    s.load();
+    assert.deepEqual(s.data.pomodoro.lifetime, { focusMinutes: 55, focusCount: 2 },
+      '休息与非法分钟数不计入累计基线');
+    // 已带 lifetime 的新存档不能被明细反向覆盖
+    fs.writeFileSync(file, JSON.stringify({
+      pomodoro: { stats: oldStats, lifetime: { focusMinutes: 999, focusCount: 40 } }
+    }));
+    const s2 = new Store(file);
+    s2.load();
+    assert.deepEqual(s2.data.pomodoro.lifetime, { focusMinutes: 999, focusCount: 40 });
+  } finally {
+    fs.rmSync(file, { force: true });
+  }
+});
+
+console.log('\n[单测] 皮肤导入回滚残留');
+
+test('皮肤导入：清理 .tmp- 残留，并恢复回滚失败留下的 .old- 旧皮肤', () => {
+  const ctx = require('../lib/context');
+  const oldDataDir = ctx.DATA_DIR;
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pixelpet-save-'));
+  const root = path.join(tmp, 'skins');
+  const id = 'rollback-test';
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
+  const dataUrl = 'data:image/png;base64,' + png.toString('base64');
+  try {
+    fs.mkdirSync(root, { recursive: true });
+    // 模拟上次导入失败：旧皮肤只剩 .old- 备份，另有一个半套 .tmp- 目录
+    const oldDir = path.join(root, `.old-${id}-1`);
+    const tmpDir = path.join(root, `.tmp-${id}-1`);
+    fs.mkdirSync(oldDir);
+    fs.mkdirSync(tmpDir);
+    fs.writeFileSync(path.join(oldDir, 'skin.json'), JSON.stringify({ name: 'OLD_SKIN' }));
+    fs.writeFileSync(path.join(tmpDir, 'half.png'), png);
+    ctx.DATA_DIR = tmp;
+    config.invalidate();
+
+    const importer = skinImport.create({ dialog: null, shell: {} });
+    const res = importer.save({ id, name: '测试', frames: [{ name: 'idle-1.png', dataUrl }], actions: {} });
+    assert.equal(res.code, 'EXISTS', '旧皮肤恢复后应如实报告目录已存在');
+    const target = path.join(root, id);
+    assert.ok(fs.existsSync(path.join(target, 'skin.json')), '旧皮肤必须被恢复，不能凭空消失');
+    assert.ok(fs.readFileSync(path.join(target, 'skin.json'), 'utf8').includes('OLD_SKIN'));
+    assert.equal(fs.existsSync(oldDir), false, '备份目录应被清理');
+    assert.equal(fs.existsSync(tmpDir), false, '.tmp- 半套目录必须清掉');
+
+    // 正常覆盖导入：成功路径同样不留任何残留
+    const ok = importer.save({ id, name: '测试', frames: [{ name: 'idle-1.png', dataUrl }], actions: {}, overwrite: true });
+    assert.equal(ok.ok, true, ok.error);
+    const leftovers = fs.readdirSync(root).filter((n) => n.startsWith('.tmp-') || n.startsWith('.old-'));
+    assert.deepEqual(leftovers, [], '导入成功后不应留下临时/备份目录');
+  } finally {
+    ctx.DATA_DIR = oldDataDir;
+    config.invalidate();
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
 });
 
 console.log(`\n[单测结果] 通过 ${passed}，失败 ${failed}`);
